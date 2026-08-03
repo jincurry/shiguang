@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光集 · 暗房工作台</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500&display=swap');
+  :root{
+    --bg:#161310; --bg-soft:#1D1915; --panel:#1A1613;
+    --ivory:#EDE5D8; --muted:#9A8E7E; --faint:#5E564A;
+    --amber:#D9A05B; --safelight:#D4553B; --ok:#7FA65A;
+    --line:#332D25; --hairline:rgba(51,45,37,.6);
+    --print:#F7F2E8; --paper-raw:#E7DFC9; --print-ink:#4A4238; --print-sub:#8C8172;
+    --serif:'Noto Serif SC','Songti SC',serif;
+    --sans:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;
+    --mono:ui-monospace,'SF Mono',Consolas,monospace;
+    --grain:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/></filter><rect width="140" height="140" filter="url(%23n)" opacity="0.5"/></svg>');
+  }
+  body.light{
+    --bg:#EFEAE0; --bg-soft:#F7F3EA; --panel:#F5F1E8;
+    --ivory:#2E2A24; --muted:#7C7263; --faint:#A89D8B;
+    --amber:#8F6A2A; --safelight:#C24A32; --ok:#5E7F3F;
+    --line:#DCD4C4; --hairline:rgba(190,178,156,.6);
+    --print:#FFFDF8; --paper-raw:#EFE9DA;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    background:var(--bg);color:var(--ivory);font-family:var(--sans);
+    line-height:1.7;-webkit-font-smoothing:antialiased;min-height:100vh;
+    transition:background-color .5s ease,color .5s ease;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(700px 400px at 80% -8%,rgba(212,85,59,.10),transparent 70%),
+               radial-gradient(520px 340px at 6% 2%,rgba(217,160,91,.06),transparent 70%);
+  }
+  body.light::before{
+    background:radial-gradient(760px 420px at 80% -8%,rgba(255,220,160,.5),transparent 70%),
+               radial-gradient(560px 360px at 6% 2%,rgba(255,240,214,.45),transparent 70%);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:80;
+    background-image:var(--grain);opacity:.05;mix-blend-mode:overlay;
+  }
+  body.light::after{opacity:.035;}
+  /* 亮色下的深色硬编码组件覆盖 */
+  body.light .topbar{background:rgba(239,234,224,.88);}
+  body.light .btn{color:#FBF6EA;}
+  body.light .ops button{background:rgba(255,253,246,.9);color:var(--ivory);
+    box-shadow:0 1px 4px rgba(90,75,55,.25);}
+  body.light .ops button:hover{background:var(--safelight);color:#fff;}
+  body.light .card{box-shadow:0 2px 5px rgba(90,75,55,.18),0 10px 24px rgba(90,75,55,.16);}
+  body.light .modal{background:rgba(243,238,228,.72);}
+  body.light .toast{background:rgba(255,253,246,.96);box-shadow:0 8px 24px rgba(90,75,55,.25);}
+  body.light .door{box-shadow:0 24px 60px rgba(90,75,55,.28);}
+
+  /* 拉线开关：从顶栏底下垂下来 */
+  .cord{
+    position:fixed;top:0;right:min(4vw,44px);z-index:35;
+    width:28px;height:118px;
+    display:flex;flex-direction:column;align-items:center;
+    transform-origin:top center;
+  }
+  .cord-line{width:2px;flex:1;background:linear-gradient(180deg,#4A4133,#8A7A5F);border-radius:1px;}
+  .cord-knob{
+    width:13px;height:24px;border-radius:7px;margin-top:-1px;
+    background:linear-gradient(180deg,#D9A05B,#8F6A2A);
+    box-shadow:0 2px 6px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.35);
+    transition:box-shadow .3s ease;
+  }
+  .cord:hover .cord-knob{box-shadow:0 2px 10px rgba(217,160,91,.6),inset 0 1px 0 rgba(255,255,255,.35);}
+  .cord.pulled{animation:cordPull .55s cubic-bezier(.3,.7,.35,1.3);}
+  body.in-app .cord{display:none;}   /* 工作台内主题切换走顶栏按钮，拉绳只在登录页 */
+  @keyframes cordPull{
+    0%{transform:translateY(0);}35%{transform:translateY(15px);}
+    70%{transform:translateY(-3px);}100%{transform:translateY(0);}
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+  input,textarea{font:inherit;color:var(--ivory);background:var(--bg-soft);
+    border:1px solid var(--line);border-radius:6px;padding:9px 12px;outline:none;
+    transition:border-color .25s;}
+  input:focus,textarea:focus{border-color:var(--amber);}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:3px;}
+  .mono{font-family:var(--mono);}
+  .view{display:none;position:relative;z-index:1;}
+  .view.on{display:block;}
+
+  /* ============ 登录 ============ */
+  #login{min-height:100vh;display:none;align-items:center;justify-content:center;padding:24px;}
+  #login.on{display:flex;}
+  .door{
+    width:min(420px,92vw);text-align:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:52px 36px 40px;position:relative;
+    box-shadow:0 30px 80px rgba(0,0,0,.5);
+  }
+  .door .bulb{
+    width:14px;height:22px;margin:0 auto 6px;border-radius:7px;
+    background:linear-gradient(180deg,#6b5638,#4a3a24);
+    box-shadow:0 0 0 rgba(212,85,59,0);transition:all .8s ease;
+  }
+  .door.lit .bulb{background:linear-gradient(180deg,#F0A56B,#D4553B);
+    box-shadow:0 0 26px rgba(212,85,59,.8);}
+  .door .cordline{width:1.5px;height:34px;background:var(--line);margin:0 auto 26px;}
+  .door h1{font-family:var(--serif);font-weight:900;font-size:30px;letter-spacing:.18em;}
+  .door h1 em{font-style:normal;color:var(--safelight);}
+  .door p.sub{margin-top:8px;color:var(--muted);font-size:13px;}
+  .door form{margin-top:30px;display:flex;flex-direction:column;gap:14px;}
+  .door input{text-align:center;font-family:var(--mono);letter-spacing:.15em;}
+  .door input.err{border-color:var(--safelight);animation:shake .4s;}
+  @keyframes shake{25%{transform:translateX(-6px)}50%{transform:translateX(5px)}75%{transform:translateX(-3px)}}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    background:var(--amber);color:#241B0E;font-weight:500;
+    border-radius:8px;padding:10px 18px;transition:filter .2s,transform .1s;
+  }
+  .btn:hover{filter:brightness(1.08);} .btn:active{transform:translateY(1px);}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);}
+  .btn.ghost:hover{color:var(--ivory);border-color:var(--muted);}
+  .btn.danger{background:transparent;color:var(--safelight);border:1px solid rgba(212,85,59,.4);}
+  .btn.danger:hover{background:rgba(212,85,59,.12);}
+  .door .hint{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;}
+
+  /* ============ 工作台框架 ============ */
+  #app{min-height:100vh;}
+  .topbar{
+    position:sticky;top:0;z-index:40;
+    display:flex;align-items:center;gap:18px;
+    padding:14px 22px;background:rgba(22,19,16,.86);
+    -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--hairline);
+  }
+  .brand{font-family:var(--serif);font-weight:900;font-size:19px;letter-spacing:.14em;white-space:nowrap;}
+  .brand em{font-style:normal;color:var(--safelight);}
+  .brand small{font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);
+    letter-spacing:.28em;margin-left:10px;}
+  .topstats{font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.1em;}
+  .topstats b{color:var(--muted);font-weight:400;}
+  .topbar .sp{flex:1;}
+  .icon-btn{
+    display:inline-flex;align-items:center;gap:7px;color:var(--muted);
+    font-size:13px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;
+    white-space:nowrap;flex:none;
+    transition:color .25s,border-color .25s;
+  }
+  .icon-btn:hover{color:var(--amber);border-color:var(--amber);}
+  .icon-btn .badge{
+    font-family:var(--mono);font-size:10px;background:var(--safelight);color:#fff;
+    border-radius:8px;padding:0 6px;line-height:16px;
+  }
+
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:0;max-width:1240px;margin:0 auto;}
+
+  /* ---------- 左栏：节点列表 ---------- */
+  .side{
+    border-right:1px solid var(--hairline);min-height:calc(100vh - 57px);
+    padding:20px 16px 40px;
+  }
+  .side-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .side-head h2{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.24em;}
+  .nodes{display:flex;flex-direction:column;gap:6px;}
+  .n-item{
+    text-align:left;width:100%;padding:12px 14px;border-radius:10px;
+    border:1px solid transparent;position:relative;
+    transition:background .2s,border-color .2s;
+  }
+  .n-item:hover{background:var(--bg-soft);}
+  .n-item.sel{background:var(--bg-soft);border-color:var(--line);}
+  .n-item.sel::before{
+    content:"";position:absolute;left:-1px;top:12px;bottom:12px;width:2px;
+    background:var(--safelight);border-radius:1px;box-shadow:0 0 8px rgba(212,85,59,.6);
+  }
+  .n-item .d{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.08em;}
+  .n-item .t{font-family:var(--serif);font-weight:600;font-size:15.5px;letter-spacing:.04em;
+    margin-top:1px;display:flex;align-items:center;gap:8px;}
+  .n-item .c{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-left:auto;}
+  .yearsep{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.2em;
+    margin:12px 6px 4px;display:flex;align-items:center;gap:10px;}
+  .yearsep::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  /* ---------- 右栏：节点详情 ---------- */
+  .detail{padding:26px 30px 80px;min-width:0;}
+  .d-empty{color:var(--faint);font-family:var(--mono);font-size:12px;letter-spacing:.15em;
+    padding:80px 0;text-align:center;}
+  .backbtn{display:none;margin-bottom:14px;}
+  .d-form{display:grid;grid-template-columns:150px 1fr;gap:12px;max-width:640px;}
+  .d-form textarea{grid-column:1/-1;resize:vertical;min-height:60px;}
+  .d-form .row2{grid-column:1/-1;display:flex;gap:10px;align-items:center;}
+  .savemark{font-family:var(--mono);font-size:11px;color:var(--ok);opacity:0;transition:opacity .4s;}
+  .savemark.show{opacity:1;}
+
+  .sect{margin-top:34px;}
+  .sect>h3{
+    font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.24em;
+    display:flex;align-items:center;gap:12px;margin-bottom:16px;
+  }
+  .sect>h3::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  /* 显影盘（上传区） */
+  .tray{
+    position:relative;border:1.5px dashed var(--line);border-radius:14px;
+    background:linear-gradient(180deg,rgba(212,85,59,.04),rgba(212,85,59,.015));
+    padding:34px 20px;text-align:center;color:var(--muted);
+    transition:border-color .25s,background .25s;
+  }
+  .tray.hover{border-color:var(--safelight);background:rgba(212,85,59,.09);color:var(--ivory);}
+  .tray .big{font-family:var(--serif);font-size:17px;letter-spacing:.06em;color:var(--ivory);}
+  .tray .small{font-size:12.5px;margin-top:4px;}
+  .tray .small b{color:var(--amber);font-weight:500;}
+  .tray input{display:none;}
+
+  /* 照片网格 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:18px;margin-top:18px;}
+  .card{
+    position:relative;background:var(--print);border-radius:3px;
+    padding:8px 8px 0;box-shadow:0 3px 6px rgba(0,0,0,.45),0 12px 28px rgba(0,0,0,.3);
+    transition:transform .25s ease,box-shadow .25s ease,opacity .3s;
+  }
+  .card.dragging{opacity:.35;}
+  .card.dropTarget::before{
+    content:"";position:absolute;left:-11px;top:6px;bottom:6px;width:3px;
+    background:var(--amber);border-radius:2px;box-shadow:0 0 8px rgba(217,160,91,.7);
+  }
+  .card .ph{
+    position:relative;height:128px;border-radius:2px;overflow:hidden;background:var(--paper-raw);
+  }
+  .card .ph .img{
+    position:absolute;inset:0;background-size:cover;background-position:center;
+    opacity:0;filter:contrast(.35) brightness(1.5) sepia(.5) blur(4px);
+    transition:opacity 1s ease,filter 1.4s ease;
+  }
+  .card .ph .img.dev{opacity:1;filter:none;}
+  .card .ph::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:var(--grain);opacity:.14;mix-blend-mode:overlay;}
+  .card .cap{
+    height:40px;display:flex;align-items:center;gap:6px;padding:0 2px;
+    font-size:11.5px;color:var(--print-ink);
+  }
+  .card .cap i{font-style:normal;font-family:var(--mono);font-size:9px;color:var(--print-sub);flex:none;}
+  .card .cap b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+  .card .cap input{
+    flex:1;min-width:0;background:#fff;border:1px solid var(--amber);
+    color:var(--print-ink);font-size:11.5px;padding:3px 6px;border-radius:3px;
+  }
+  /* 封面星标 */
+  .card .star{position:absolute;top:12px;left:12px;z-index:3;font-size:12px;
+    color:#F4C86A;text-shadow:0 1px 3px rgba(0,0,0,.6);display:none;}
+  .card.cover .star{display:block;}
+  /* 悬浮操作 */
+  .card .ops{
+    position:absolute;top:10px;right:10px;z-index:3;display:flex;gap:6px;
+    opacity:0;transition:opacity .2s;
+  }
+  .card:hover .ops,.card:focus-within .ops{opacity:1;}
+  .ops button{
+    width:26px;height:26px;border-radius:6px;font-size:12px;
+    background:rgba(22,19,16,.72);color:var(--ivory);
+    display:grid;place-items:center;
+  }
+  .ops button:hover{background:var(--safelight);}
+  /* 拖拽把手（木夹） */
+  .handle{
+    position:absolute;top:-11px;left:50%;transform:translateX(-50%);z-index:3;
+    width:14px;height:24px;border-radius:3px;cursor:grab;touch-action:none;
+    background:linear-gradient(180deg,#C79E63,#8A6739 70%,#6E5230);
+    box-shadow:0 2px 4px rgba(0,0,0,.5);
+  }
+  .handle:active{cursor:grabbing;}
+  .handle::after{content:"";position:absolute;left:50%;top:4px;bottom:4px;width:1.5px;
+    transform:translateX(-50%);background:rgba(60,42,20,.55);}
+
+  /* 上传中 / 失败态 */
+  .card .prog{
+    position:absolute;left:8px;right:8px;bottom:44px;height:3px;z-index:2;
+    background:rgba(0,0,0,.18);border-radius:2px;overflow:hidden;display:none;
+  }
+  .card.uploading .prog{display:block;}
+  .card .prog i{display:block;height:100%;width:0;background:var(--amber);transition:width .2s;}
+  .card .statebadge{
+    position:absolute;inset:8px 8px 48px;z-index:2;display:none;
+    align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:#B4543E;
+    border:1px dashed rgba(180,84,62,.55);transform:rotate(-6deg);
+  }
+  .card.failed .statebadge{display:flex;}
+  .card.failed .retry{
+    position:absolute;bottom:48px;left:50%;transform:translateX(-50%);z-index:3;
+    font-size:11px;padding:3px 10px;border-radius:6px;
+    background:rgba(212,85,59,.9);color:#fff;
+  }
+  .card .retry{display:none;} .card.failed .retry{display:block;}
+
+  /* ============ 回收站 ============ */
+  .trashlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;padding:26px 30px;}
+  .t-item{
+    background:var(--bg-soft);border:1px solid var(--line);border-radius:10px;padding:16px;
+  }
+  .t-item .ty{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.2em;}
+  .t-item .nm{font-family:var(--serif);font-weight:600;margin-top:4px;font-size:15px;}
+  .t-item .cd{font-family:var(--mono);font-size:11px;color:var(--safelight);margin-top:6px;}
+  .t-item .row{margin-top:12px;display:flex;gap:8px;}
+  .t-empty{grid-column:1/-1;text-align:center;color:var(--faint);
+    font-family:var(--mono);font-size:12px;letter-spacing:.15em;padding:60px 0;}
+
+  /* ============ 弹层 / Toast ============ */
+  .modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
+    background:rgba(14,12,10,.7);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);padding:24px;}
+  .modal.on{display:flex;}
+  .modal .box{
+    width:min(400px,92vw);background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:26px;box-shadow:0 30px 70px rgba(0,0,0,.5);
+  }
+  .modal h4{font-family:var(--serif);font-size:17px;letter-spacing:.04em;}
+  .modal p{margin-top:8px;color:var(--muted);font-size:13.5px;}
+  .modal .row{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;}
+  #toasts{position:fixed;left:0;right:0;bottom:26px;z-index:95;
+    display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;}
+  .toast{
+    font-family:var(--mono);font-size:12px;letter-spacing:.08em;
+    background:rgba(29,25,21,.94);border:1px solid var(--line);color:var(--ivory);
+    padding:9px 18px;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,.4);
+    animation:tIn .3s ease;
+  }
+  .toast.ok{border-color:rgba(127,166,90,.5);} .toast.err{border-color:rgba(212,85,59,.6);}
+  @keyframes tIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;}}
+
+  @media (max-width:760px){
+    .layout{grid-template-columns:1fr;}
+    .topbar{gap:8px;padding:12px 14px;}
+    .brand{font-size:17px;}
+    .brand small{display:none;}
+    .icon-btn{padding:7px 10px;font-size:12.5px;}
+    .icon-btn .tx{display:none;}       /* 手机端只留图标，防止顶栏换行 */
+    #logoutBtn .tx{display:inline;}    /* 退出保留文字，避免误触 */
+    .side{border-right:none;min-height:0;padding-bottom:8px;}
+    .detail{padding:18px 18px 80px;}
+    .layout.showDetail .side{display:none;}
+    .layout:not(.showDetail) .detail{display:none;}
+    .backbtn{display:inline-flex;}
+    .d-form{grid-template-columns:1fr;}
+    .topstats{display:none;}
+    .grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:14px;}
+    .card .ops{opacity:1;}     /* 触屏无 hover，常显 */
+  }
+</style>
+</head>
+<body>
+
+<button class="cord" id="cord" aria-label="拉灯：切换亮/暗主题" aria-pressed="false" title="拉一下开灯 / 关灯">
+  <span class="cord-line" aria-hidden="true"></span>
+  <span class="cord-knob" aria-hidden="true"></span>
+</button>
+
+<!-- ================= 登录 ================= -->
+<div class="view on" id="login">
+  <div class="door" id="door">
+    <div class="cordline"></div><div class="bulb" id="bulb"></div>
+    <h1>拾光<em>·</em>集</h1>
+    <p class="sub">暗房工作台 · 请出示管理口令</p>
+    <form id="loginForm">
+      <input type="password" id="token" placeholder="ADMIN TOKEN" autocomplete="current-password">
+      <button class="btn" type="submit">拉灯 · 进入暗房</button>
+    </form>
+    <p class="hint">原型演示：任意 ≥ 8 位字符即可进入</p>
+  </div>
+</div>
+
+<!-- ================= 工作台 ================= -->
+<div class="view" id="app">
+  <div class="topbar">
+    <span class="brand">拾光<em>·</em>集<small>DARKROOM CONSOLE</small></span>
+    <span class="topstats" id="stats"></span>
+    <span class="sp"></span>
+    <button class="icon-btn" id="themeBtn"><span class="ic">🔆</span><span class="tx">开灯</span></button>
+    <button class="icon-btn" id="trashBtn">🗑 <span class="tx">回收站</span> <span class="badge" id="trashCount" hidden>0</span></button>
+    <button class="icon-btn" id="logoutBtn">⏻ <span class="tx">锁门退出</span></button>
+  </div>
+
+  <!-- 主视图：列表 + 详情 -->
+  <div class="layout" id="mainView">
+    <aside class="side">
+      <div class="side-head">
+        <h2>时间轴节点</h2>
+        <button class="btn" id="newNode" style="padding:6px 12px;font-size:13px">＋ 新建</button>
+      </div>
+      <div class="nodes" id="nodeList"></div>
+    </aside>
+
+    <main class="detail" id="detail"></main>
+  </div>
+
+  <!-- 回收站视图 -->
+  <div id="trashView" style="display:none">
+    <div style="padding:22px 30px 0;display:flex;align-items:center;gap:14px">
+      <button class="icon-btn" id="trashBack">← 返回</button>
+      <h3 style="font-family:var(--serif);letter-spacing:.06em">回收站</h3>
+      <span class="mono" style="font-size:11px;color:var(--faint)">物品保留 7 天，到期自动清除</span>
+    </div>
+    <div class="trashlist" id="trashList"></div>
+  </div>
+</div>
+
+<!-- 确认弹层 -->
+<div class="modal" id="modal">
+  <div class="box">
+    <h4 id="mTitle"></h4><p id="mBody"></p>
+    <div class="row">
+      <button class="btn ghost" id="mCancel">取消</button>
+      <button class="btn danger" id="mOk">确认</button>
+    </div>
+  </div>
+</div>
+<div id="toasts"></div>
+
+<script>
+/* ================= 状态（原型：内存态） ================= */
+const G=(a,b)=>`linear-gradient(150deg,${a},${b})`;
+let seq=100;
+const uid=()=> 'p'+(++seq);
+const state={
+  nodes:[
+    {id:'n1',date:'2026-05-21',title:'黄山两日',desc:'云海来得比预报早，日出在光明顶。',photos:[
+      {id:uid(),cap:'云海翻涌',bg:G('#8FA6B8','#EFE7D6'),st:'ready'},
+      {id:uid(),cap:'迎客松',bg:G('#33402F','#A9BC8F'),st:'ready'},
+      {id:uid(),cap:'日出前的蓝',bg:G('#1E2A44','#C98A6B'),st:'ready'},
+    ]},
+    {id:'n2',date:'2026-02-14',title:'家里的年夜饭',desc:'今年轮到我掌勺。',photos:[
+      {id:uid(),cap:'一桌菜',bg:G('#6E1423','#DB8A5A'),st:'ready'},
+      {id:uid(),cap:'贴春联',bg:G('#7F1D1D','#E8B77E'),st:'ready'},
+    ]},
+    {id:'n3',date:'2025-10-03',title:'川西环线自驾',desc:'四姑娘山到色达。',photos:[
+      {id:uid(),cap:'牧场黄昏',bg:G('#7A4A28','#F2DDB4'),st:'ready'},
+    ]},
+  ],
+  trash:[], sel:null,
+};
+
+/* ================= 工具 ================= */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg,cls=''){
+  const t=document.createElement('div');t.className='toast '+cls;t.textContent=msg;
+  $('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity=0;t.style.transition='opacity .4s';
+    setTimeout(()=>t.remove(),400);},2400);
+}
+function confirmBox(title,body){
+  return new Promise(res=>{
+    $('#mTitle').textContent=title;$('#mBody').textContent=body;
+    $('#modal').classList.add('on');
+    const done=v=>{ $('#modal').classList.remove('on');ok.onclick=cc.onclick=null;res(v); };
+    const ok=$('#mOk'),cc=$('#mCancel');
+    ok.onclick=()=>done(true);cc.onclick=()=>done(false);
+  });
+}
+const node=id=>state.nodes.find(n=>n.id===id);
+
+/* ================= 主题切换（登录页拉绳 + 工作台顶栏按钮，同一处理器） ================= */
+const cord=$('#cord'), themeBtn=$('#themeBtn');
+function syncThemeBtn(){
+  const light=document.body.classList.contains('light');
+  themeBtn.querySelector('.ic').textContent = light?'🌙':'🔆';
+  themeBtn.querySelector('.tx').textContent = light?'关灯':'开灯';
+  themeBtn.setAttribute('aria-pressed',light);
+  cord.setAttribute('aria-pressed',light);
+}
+function toggleTheme(){
+  const light=document.body.classList.toggle('light');
+  cord.classList.remove('pulled');void cord.offsetWidth;cord.classList.add('pulled');
+  syncThemeBtn();
+  toast(light?'已开灯 · 亮色相纸间':'已关灯 · 回到暗房','ok');
+}
+cord.addEventListener('click',toggleTheme);
+themeBtn.addEventListener('click',toggleTheme);
+syncThemeBtn();
+
+/* ================= 登录 ================= */
+$('#loginForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const v=$('#token').value.trim();
+  if(v.length<8){
+    $('#token').classList.add('err');toast('口令不足 8 位','err');
+    setTimeout(()=>$('#token').classList.remove('err'),450);return;
+  }
+  $('#door').classList.add('lit');
+  setTimeout(()=>{ $('#login').classList.remove('on');$('#app').classList.add('on');
+    document.body.classList.add('in-app');
+    state.sel=state.nodes[0]?.id||null;renderAll(); },800);
+});
+$('#logoutBtn').addEventListener('click',()=>{
+  $('#app').classList.remove('on');$('#login').classList.add('on');
+  document.body.classList.remove('in-app');
+  $('#door').classList.remove('lit');$('#token').value='';
+});
+
+/* ================= 渲染 ================= */
+function renderAll(){renderList();renderDetail();renderStats();renderTrashBadge();}
+function renderStats(){
+  const p=state.nodes.reduce((a,n)=>a+n.photos.length,0);
+  $('#stats').innerHTML=`<b>${state.nodes.length}</b> 节点 · <b>${p}</b> 相纸`;
+}
+function renderTrashBadge(){
+  const el=$('#trashCount');el.hidden=!state.trash.length;el.textContent=state.trash.length;
+}
+function renderList(){
+  const sorted=[...state.nodes].sort((a,b)=>b.date.localeCompare(a.date));
+  let html='',year='';
+  sorted.forEach(n=>{
+    const y=n.date.slice(0,4);
+    if(y!==year){year=y;html+=`<div class="yearsep">${y}</div>`;}
+    html+=`<button class="n-item ${n.id===state.sel?'sel':''}" data-id="${n.id}">
+      <span class="d">${n.date}</span>
+      <span class="t">${esc(n.title)}<span class="c">×${n.photos.length}</span></span>
+    </button>`;
+  });
+  $('#nodeList').innerHTML=html||'<div class="t-empty">还没有节点</div>';
+}
+$('#nodeList').addEventListener('click',e=>{
+  const b=e.target.closest('.n-item');if(!b)return;
+  state.sel=b.dataset.id;renderList();renderDetail();
+  $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
+});
+
+function renderDetail(){
+  const n=node(state.sel);
+  const d=$('#detail');
+  if(!n){d.innerHTML='<div class="d-empty">← 选择或新建一个节点</div>';return;}
+  d.innerHTML=`
+    <button class="icon-btn backbtn" id="backList">← 节点列表</button>
+    <div class="d-form">
+      <input type="date" id="fDate" value="${n.date}">
+      <input type="text" id="fTitle" maxlength="120" value="${esc(n.title)}" placeholder="标题">
+      <textarea id="fDesc" maxlength="2000" placeholder="描述">${esc(n.desc)}</textarea>
+      <div class="row2">
+        <button class="btn" id="saveNode">保存节点</button>
+        <span class="savemark" id="saved">✓ 已保存</span>
+        <span style="flex:1"></span>
+        <button class="btn danger" id="delNode">移入回收站</button>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h3>显影盘 · 上传</h3>
+      <label class="tray" id="tray">
+        <div class="big">把照片拖进显影盘</div>
+        <div class="small">或 <b>点击选择</b> · jpg / png / webp · 单张 ≤ 30MB</div>
+        <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple>
+      </label>
+    </div>
+
+    <div class="sect">
+      <h3>晾片整理 · 拖木夹排序 / 点 ✎ 改注 / ★ 设封面</h3>
+      <div class="grid" id="grid"></div>
+    </div>`;
+  renderGrid(n);
+
+  $('#backList').onclick=()=>$('#mainView').classList.remove('showDetail');
+  $('#saveNode').onclick=()=>{
+    const t=$('#fTitle').value.trim();
+    if(!t){toast('标题不能为空','err');return;}
+    n.date=$('#fDate').value||n.date;n.title=t;n.desc=$('#fDesc').value;
+    renderList();renderStats();
+    $('#saved').classList.add('show');setTimeout(()=>$('#saved')?.classList.remove('show'),1600);
+  };
+  $('#delNode').onclick=async()=>{
+    if(await confirmBox('移入回收站？',`节点「${n.title}」及其 ${n.photos.length} 张照片将进入回收站，7 天内可恢复。`)){
+      state.trash.push({type:'node',data:n,at:Date.now()});
+      state.nodes=state.nodes.filter(x=>x.id!==n.id);
+      state.sel=state.nodes[0]?.id||null;
+      renderAll();toast('已移入回收站','ok');
+    }
+  };
+  /* 显影盘 */
+  const tray=$('#tray');
+  ;['dragenter','dragover'].forEach(ev=>tray.addEventListener(ev,e=>{e.preventDefault();tray.classList.add('hover');}));
+  ;['dragleave','drop'].forEach(ev=>tray.addEventListener(ev,e=>{e.preventDefault();tray.classList.remove('hover');}));
+  tray.addEventListener('drop',e=>ingest(n,[...e.dataTransfer.files]));
+  $('#file').addEventListener('change',e=>{ingest(n,[...e.target.files]);e.target.value='';});
+}
+
+function renderGrid(n){
+  const g=$('#grid');
+  g.innerHTML=n.photos.map((p,i)=>`
+    <figure class="card ${i===0?'cover':''} ${p.st==='uploading'?'uploading':''} ${p.st==='failed'?'failed':''}"
+            data-id="${p.id}">
+      <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
+      <span class="star">★ 封面</span>
+      <div class="ops">
+        <button data-op="cap" title="改图注">✎</button>
+        <button data-op="cover" title="设为封面">★</button>
+        <button data-op="del" title="删除">✕</button>
+      </div>
+      <div class="ph">
+        <div class="img ${p.st==='ready'?'dev':''}" style="background-image:${p.bg}"></div>
+      </div>
+      <span class="statebadge">曝光失败</span>
+      <button class="retry" data-op="retry">重试</button>
+      <div class="prog"><i style="width:${p.prog||0}%"></i></div>
+      <figcaption class="cap"><i>No.${String(i+1).padStart(2,'0')}</i><b>${esc(p.cap)}</b></figcaption>
+    </figure>`).join('');
+  bindCards(n);
+}
+
+/* ================= 上传（模拟真实流程，可用真图） ================= */
+function ingest(n,files){
+  const ok=files.filter(f=>/image\/(jpeg|png|webp)/.test(f.type));
+  if(files.length&&!ok.length){toast('仅支持 jpg / png / webp','err');return;}
+  ok.forEach(f=>{
+    if(f.size>30*1024*1024){toast(`${f.name} 超过 30MB，已拒绝`,'err');return;}
+    const p={id:uid(),cap:f.name.replace(/\.[^.]+$/,''),
+             bg:`url('${URL.createObjectURL(f)}')`,st:'uploading',prog:0};
+    n.photos.push(p);renderGrid(n);renderList();renderStats();
+    simulate(n,p);
+  });
+}
+function simulate(n,p){
+  const tick=setInterval(()=>{
+    p.prog=Math.min(100,p.prog+8+Math.random()*16);
+    const el=document.querySelector(`.card[data-id="${p.id}"] .prog i`);
+    if(el)el.style.width=p.prog+'%';
+    if(p.prog>=100){
+      clearInterval(tick);
+      /* 12% 概率演示失败态 */
+      if(Math.random()<0.12){p.st='failed';renderGrid(n);toast('1 张曝光失败，可重试','err');return;}
+      p.st='processing';renderGrid(n);
+      const img=document.querySelector(`.card[data-id="${p.id}"] .img`);
+      requestAnimationFrame(()=>img&&img.classList.add('dev'));   /* 显影 */
+      setTimeout(()=>{p.st='ready';},1200);
+    }
+  },120);
+}
+
+/* ================= 卡片操作 + 拖拽排序 ================= */
+function bindCards(n){
+  const g=$('#grid');
+  g.onclick=async e=>{
+    const btn=e.target.closest('button[data-op]');if(!btn)return;
+    const card=e.target.closest('.card');const p=n.photos.find(x=>x.id===card.dataset.id);
+    const op=btn.dataset.op;
+    if(op==='del'){
+      if(await confirmBox('删除这张照片？','将进入回收站，7 天内可恢复。')){
+        state.trash.push({type:'photo',data:p,nodeId:n.id,at:Date.now()});
+        n.photos=n.photos.filter(x=>x.id!==p.id);
+        renderGrid(n);renderList();renderStats();renderTrashBadge();toast('已移入回收站','ok');
+      }
+    }else if(op==='cover'){
+      n.photos=[p,...n.photos.filter(x=>x.id!==p.id)];
+      renderGrid(n);toast('已设为封面','ok');
+    }else if(op==='cap'){
+      const b=card.querySelector('.cap b');
+      const inp=document.createElement('input');inp.value=p.cap;inp.maxLength=200;
+      b.replaceWith(inp);inp.focus();inp.select();
+      const commit=()=>{p.cap=inp.value.trim()||p.cap;renderGrid(n);};
+      inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')commit();if(ev.key==='Escape')renderGrid(n);});
+      inp.addEventListener('blur',commit);
+    }else if(op==='retry'){
+      p.st='uploading';p.prog=0;renderGrid(n);simulate(n,p);
+    }
+  };
+  /* 木夹把手拖拽排序（pointer 版，桌面/触屏通用） */
+  g.querySelectorAll('.handle').forEach(h=>{
+    h.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      const card=h.closest('.card');const from=card.dataset.id;
+      card.classList.add('dragging');h.setPointerCapture(e.pointerId);
+      let target=null;
+      const move=ev=>{
+        const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.card');
+        g.querySelectorAll('.card').forEach(c=>c.classList.remove('dropTarget'));
+        target=(el&&el!==card)?el:null;
+        if(target)target.classList.add('dropTarget');
+      };
+      const up=()=>{
+        h.removeEventListener('pointermove',move);h.removeEventListener('pointerup',up);
+        card.classList.remove('dragging');
+        g.querySelectorAll('.card').forEach(c=>c.classList.remove('dropTarget'));
+        if(target){
+          const arr=n.photos;
+          const fi=arr.findIndex(x=>x.id===from), ti=arr.findIndex(x=>x.id===target.dataset.id);
+          const [mv]=arr.splice(fi,1);arr.splice(ti,0,mv);
+          renderGrid(n);toast('顺序已更新','ok');
+        }
+      };
+      h.addEventListener('pointermove',move);h.addEventListener('pointerup',up);
+    });
+  });
+}
+
+/* ================= 新建节点 ================= */
+$('#newNode').addEventListener('click',()=>{
+  const n={id:'n'+Date.now(),date:new Date().toISOString().slice(0,10),
+           title:'未命名节点',desc:'',photos:[]};
+  state.nodes.unshift(n);state.sel=n.id;
+  renderAll();$('#mainView').classList.add('showDetail');
+  setTimeout(()=>{$('#fTitle')?.focus();$('#fTitle')?.select();},50);
+});
+
+/* ================= 回收站 ================= */
+$('#trashBtn').addEventListener('click',()=>{$('#mainView').style.display='none';
+  $('#trashView').style.display='block';renderTrash();});
+$('#trashBack').addEventListener('click',()=>{$('#trashView').style.display='none';
+  $('#mainView').style.display='grid';});
+function daysLeft(at){return Math.max(0,7-Math.floor((Date.now()-at)/86400000));}
+function renderTrash(){
+  const el=$('#trashList');
+  if(!state.trash.length){el.innerHTML='<div class="t-empty">回收站是空的</div>';return;}
+  el.innerHTML=state.trash.map((t,i)=>`
+    <div class="t-item">
+      <div class="ty">${t.type==='node'?'节点':'照片'}</div>
+      <div class="nm">${esc(t.type==='node'?t.data.title:t.data.cap)}</div>
+      ${t.type==='node'?`<div class="mono" style="font-size:11px;color:var(--muted)">${t.data.date} · ${t.data.photos.length} 张</div>`:''}
+      <div class="cd">${daysLeft(t.at)} 天后自动清除</div>
+      <div class="row">
+        <button class="btn" style="padding:6px 14px;font-size:12.5px" data-restore="${i}">恢复</button>
+      </div>
+    </div>`).join('');
+  el.onclick=e=>{
+    const b=e.target.closest('[data-restore]');if(!b)return;
+    const t=state.trash.splice(+b.dataset.restore,1)[0];
+    if(t.type==='node'){state.nodes.push(t.data);}
+    else{(node(t.nodeId)||state.nodes[0])?.photos.push(t.data);}
+    renderAll();renderTrash();toast('已恢复','ok');
+  };
+}
+</script>
+</body>
+</html>
