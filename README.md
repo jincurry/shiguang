@@ -24,6 +24,7 @@ docker compose up -d
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
+| `SG_HTTP_PORT` | `8080` | Docker 部署时映射到宿主机的访问端口 |
 | `SG_ADDR` | `:8080` | 监听地址 |
 | `SG_DB_DSN` | `file:data/shiguang.db` | SQLite 路径（`file:` DSN；WAL/busy_timeout 等 PRAGMA 由程序自动追加） |
 | `SG_ADMIN_TOKEN` / `SG_ADMIN_TOKEN_FILE` | — | **必填其一**。管理口令（写接口 Bearer token） |
