@@ -146,16 +146,31 @@ func runImport(args []string) error {
 		}
 		groups := importer.Plan(photos, mode, *title)
 		fmt.Printf("扫描 %s：%d 张可导入照片，将归入 %d 个节点\n\n", root, len(photos), len(groups))
+
+		var noEXIF []*importer.Group
 		for _, g := range groups {
-			exif := 0
-			for _, p := range g.Photos {
-				if p.HasEXIF {
-					exif++
-				}
+			mark := "  "
+			if !g.DateFromEXIF {
+				mark = "⚠ " // 日期来自文件修改时间，多半不是真实拍摄日
+				noEXIF = append(noEXIF, g)
 			}
-			fmt.Printf("  %s  %-28s %3d 张（%d 张带 EXIF 拍摄时间）\n",
-				g.Date, truncate(g.Title, 28), len(g.Photos), exif)
+			fmt.Printf("  %s%s  %-28s %3d 张（%d 张带 EXIF 拍摄时间）\n",
+				mark, g.Date, truncate(g.Title, 28), len(g.Photos), g.EXIFCount())
 		}
+
+		if len(noEXIF) > 0 {
+			fmt.Printf("\n⚠ 有 %d 个节点的日期来自「文件修改时间」而非 EXIF 拍摄时间：\n", len(noEXIF))
+			for i, g := range noEXIF {
+				if i >= 8 {
+					fmt.Printf("    …… 另有 %d 个\n", len(noEXIF)-8)
+					break
+				}
+				fmt.Printf("    %s  %s\n", g.Date, g.Title)
+			}
+			fmt.Println("  扫描件、被聊天软件转发过的照片通常没有 EXIF，这些日期多半不是真实拍摄日。")
+			fmt.Println("  导入后请在管理后台逐个核对修改；或先按事件整理成文件夹，导入后改节点日期更省事。")
+		}
+
 		if len(skipped) > 0 {
 			fmt.Printf("\n跳过 %d 个文件：\n", len(skipped))
 			for i, s := range skipped {

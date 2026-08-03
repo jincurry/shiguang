@@ -53,9 +53,24 @@ type Photo struct {
 
 // Group 是一个待创建/复用的时间轴节点及其照片。
 type Group struct {
-	Date   string // YYYY-MM-DD
+	Date   string // YYYY-MM-DD，取组内最早的拍摄时间
 	Title  string
 	Photos []*Photo
+	// DateFromEXIF 表示决定 Date 的那张照片是否带 EXIF 拍摄时间。
+	// 为 false 说明日期来自文件修改时间——扫描的老照片、被聊天软件转发过的
+	// 图片都属此类，日期通常与实际拍摄日无关，导入后需要人工核对。
+	DateFromEXIF bool
+}
+
+// EXIFCount 返回组内带 EXIF 拍摄时间的照片数。
+func (g *Group) EXIFCount() int {
+	n := 0
+	for _, p := range g.Photos {
+		if p.HasEXIF {
+			n++
+		}
+	}
+	return n
 }
 
 // skipDir 是扫描时跳过的目录名（系统缩略图/元数据目录）。
@@ -182,10 +197,6 @@ func Plan(photos []*Photo, mode GroupMode, singleTitle string) []*Group {
 			byKey[key] = g
 			order = append(order, key)
 		}
-		// 组内日期取最早的一张，标题保持不变
-		if date < g.Date {
-			g.Date = date
-		}
 		g.Photos = append(g.Photos, p)
 	}
 
@@ -222,6 +233,14 @@ func Plan(photos []*Photo, mode GroupMode, singleTitle string) []*Group {
 			}
 			return g.Photos[i].Rel < g.Photos[j].Rel
 		})
+		// 排序后第一张即最早，节点日期与其可信度都由它决定
+		if len(g.Photos) > 0 {
+			g.Date = g.Photos[0].TakenAt.Format("2006-01-02")
+			g.DateFromEXIF = g.Photos[0].HasEXIF
+			if mode == GroupDate {
+				g.Title = g.Date
+			}
+		}
 		out = append(out, g)
 	}
 	// 节点按日期倒序（与时间轴一致），日期相同按标题

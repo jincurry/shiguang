@@ -314,6 +314,27 @@
   .modal h4{font-family:var(--serif);font-size:17px;letter-spacing:.04em;}
   .modal p{margin-top:8px;color:var(--muted);font-size:13.5px;}
   .modal .row{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;}
+
+  /* 节点选择器（移动照片到其他节点） */
+  .picklist{
+    margin-top:16px;max-height:min(46vh,340px);overflow-y:auto;
+    display:flex;flex-direction:column;gap:4px;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+  }
+  .picklist::-webkit-scrollbar{width:6px;}
+  .picklist::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .pick{
+    text-align:left;width:100%;padding:9px 12px;border-radius:8px;
+    border:1px solid transparent;display:flex;align-items:baseline;gap:10px;
+    transition:background .2s,border-color .2s;
+  }
+  .pick:hover{background:var(--bg-soft);border-color:var(--line);}
+  .pick .d{font-family:var(--mono);font-size:10.5px;color:var(--amber);flex:none;}
+  .pick .t{font-family:var(--serif);font-weight:600;font-size:14.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pick .c{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto;flex:none;}
+  .pick-empty{color:var(--faint);font-family:var(--mono);font-size:12px;
+    letter-spacing:.1em;text-align:center;padding:28px 0;}
   #toasts{position:fixed;left:0;right:0;bottom:26px;z-index:95;
     display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;}
   .toast{
@@ -432,6 +453,18 @@
     </div>
   </div>
 </div>
+
+<!-- 节点选择弹层（移动照片） -->
+<div class="modal" id="pickModal">
+  <div class="box">
+    <h4>移到哪个节点？</h4>
+    <p id="pickBody"></p>
+    <div class="picklist" id="pickList"></div>
+    <div class="row">
+      <button class="btn ghost" id="pickCancel">取消</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
 <div id="batchbar" hidden>
   <div class="row"><span id="batchText"></span><em id="batchSub"></em></div>
@@ -537,6 +570,41 @@ function confirmBox(title, body){
     const done = v => { $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null; res(v); };
     const ok = $('#mOk'), cc = $('#mCancel');
     ok.onclick = () => done(true); cc.onclick = () => done(false);
+  });
+}
+
+/* 节点选择器：列出除 excludeId 外的全部节点，返回选中的 id 或 null */
+function pickNode(excludeId, hint){
+  return new Promise(res => {
+    const list = $('#pickList');
+    $('#pickBody').textContent = hint || '';
+    const items = [...state.nodes]
+      .filter(n => n.id !== excludeId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if(!items.length){
+      list.innerHTML = '<div class="pick-empty">没有其他节点可移动</div>';
+    }else{
+      list.innerHTML = items.map(n => `
+        <button class="pick" data-id="${esc(n.id)}">
+          <span class="d">${esc(n.date)}</span>
+          <span class="t">${esc(n.title)}</span>
+          <span class="c">×${n.photos.length}</span>
+        </button>`).join('');
+    }
+    $('#pickModal').classList.add('on');
+    const done = v => {
+      $('#pickModal').classList.remove('on');
+      list.onclick = null; $('#pickCancel').onclick = null;
+      document.removeEventListener('keydown', onKey);
+      res(v);
+    };
+    const onKey = e => { if(e.key === 'Escape') done(null); };
+    document.addEventListener('keydown', onKey);
+    list.onclick = e => {
+      const b = e.target.closest('.pick');
+      if(b) done(b.dataset.id);
+    };
+    $('#pickCancel').onclick = () => done(null);
   });
 }
 const node = id => state.nodes.find(n => n.id === id);
@@ -669,7 +737,7 @@ function renderDetail(){
     </div>
 
     <div class="sect">
-      <h3>晾片整理 · 拖木夹排序 / 点 ✎ 改注 / ★ 设封面</h3>
+      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点</h3>
       <div class="grid" id="grid"></div>
     </div>`;
   renderGrid(n);
@@ -751,6 +819,7 @@ function renderGrid(n){
       <div class="ops">
         <button data-op="cap" title="改图注">✎</button>
         <button data-op="cover" title="设为封面">★</button>
+        <button data-op="move" title="移到其他节点">⇄</button>
         <button data-op="del" title="删除">✕</button>
       </div>
       <div class="ph">
@@ -993,6 +1062,27 @@ function bindCards(n){
           toast('已移入回收站', 'ok');
         }catch(err){
           toast(errMsg(err, '删除失败'), 'err');
+        }
+      }
+    }else if(op === 'move'){
+      if(String(p.id).startsWith('tmp-')){
+        toast('这张还在上传中，稍后再移', 'err');
+        return;
+      }
+      const target = await pickNode(n.id, `把「${p.cap}」移到：`);
+      if(!target) return;
+      try{
+        await api(`/photos/${p.id}`, {method: 'PATCH', body: {node_id: target}});
+        n.photos = n.photos.filter(x => x.id !== p.id);
+        const tn = node(target);
+        if(tn) tn.photos.push(p);          /* 服务端把它挂到目标节点末尾 */
+        renderGrid(n); renderList(); renderStats();
+        toast(`已移到「${tn ? tn.title : '目标节点'}」`, 'ok');
+      }catch(err){
+        if(err.status === 409){
+          toast('目标节点已有同一张照片', 'err');
+        }else{
+          toast(errMsg(err, '移动失败'), 'err');
         }
       }
     }else if(op === 'cover'){

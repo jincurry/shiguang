@@ -274,3 +274,43 @@ func TestScanRejectsNonDirectory(t *testing.T) {
 		t.Error("scanning a missing dir should error")
 	}
 }
+
+// TestPlanDateFromEXIF 节点日期的可信度由「决定日期的那张照片」决定，
+// 而不是组内是否人人都有 EXIF——警告要精确指向真正不可信的节点。
+func TestPlanDateFromEXIF(t *testing.T) {
+	withEXIF := func(rel, taken string) *Photo {
+		p := mkPhoto(rel, taken)
+		p.HasEXIF = true
+		return p
+	}
+
+	// 组内最早那张有 EXIF → 日期可信，尽管另一张没有
+	mixed := Plan([]*Photo{
+		withEXIF("旅行/a.jpg", "2023-04-15 09:00"),
+		mkPhoto("旅行/b.jpg", "2026-08-03 10:00"),
+	}, GroupFolder, "")
+	if len(mixed) != 1 || !mixed[0].DateFromEXIF {
+		t.Errorf("earliest photo has EXIF → date should be trusted: %+v", mixed[0])
+	}
+	if mixed[0].Date != "2023-04-15" {
+		t.Errorf("date = %s, want 2023-04-15", mixed[0].Date)
+	}
+	if n := mixed[0].EXIFCount(); n != 1 {
+		t.Errorf("EXIFCount = %d, want 1", n)
+	}
+
+	// 最早那张没 EXIF → 日期不可信，即使组里有别的照片带 EXIF
+	untrusted := Plan([]*Photo{
+		mkPhoto("旅行/a.jpg", "2020-01-01 09:00"),
+		withEXIF("旅行/b.jpg", "2023-04-15 10:00"),
+	}, GroupFolder, "")
+	if untrusted[0].DateFromEXIF {
+		t.Errorf("earliest photo lacks EXIF → date should be flagged: %+v", untrusted[0])
+	}
+
+	// 全无 EXIF → 不可信
+	none := Plan([]*Photo{mkPhoto("x/a.jpg", "2024-01-01 09:00")}, GroupFolder, "")
+	if none[0].DateFromEXIF {
+		t.Error("no EXIF at all → date should be flagged")
+	}
+}

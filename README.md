@@ -125,8 +125,13 @@ sgctl import ~/Photos --server https://photos.example.com
   `--concurrency 8`。
 - s3 模式下自动走 presign 直传，照片不经过应用服务器。
 
-导入后想重新归类，管理后台的照片可以跨节点移动（`PATCH /photos/{id}`
-带 `node_id`）。
+**日期可信度提示**：`--dry-run` 会用 `⚠` 标出「日期来自文件修改时间而非 EXIF
+拍摄时间」的节点。扫描件、被聊天软件转发过的照片通常没有 EXIF，这类节点的
+日期多半不是真实拍摄日，导入后需要在后台核对。建议先看 dry-run 再决定是
+调整文件夹结构，还是导入后手工改日期。
+
+导入后想重新归类，管理后台每张照片的悬浮操作里有 `⇄`（移到其他节点），
+点开选目标节点即可；对应 API 是 `PATCH /photos/{id}` 带 `node_id`。
 
 ## curl 冒烟脚本
 
