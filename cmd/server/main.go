@@ -83,6 +83,8 @@ func main() {
 		LocalBlob:  localBlob,
 		IndexHTML:  web.IndexHTML,
 		AdminHTML:  web.AdminHTML,
+		GlobalRPS:  float64(cfg.GlobalRPS),
+		UploadRPM:  float64(cfg.UploadRPM),
 	})
 
 	to := defaultTimeouts()

@@ -127,6 +127,65 @@ func (s *Store) UpdatePhotoOrd(ctx context.Context, id string, ord int64, now st
 	return nil
 }
 
+// MovePhoto 把照片移到另一个节点：事务内校验目标节点存活、目标节点无同 sha
+// 照片（否则违反 uq_node_sha 唯一索引），然后挂到目标节点末尾并重算 ord。
+// 返回 ErrNotFound（照片或目标节点不存在）或 ErrDuplicate（目标节点已有同图）。
+func (s *Store) MovePhoto(ctx context.Context, photoID, targetNodeID, now string) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		var sha sql.NullString
+		var curNode string
+		err := tx.QueryRowContext(ctx,
+			`SELECT node_id, sha256 FROM photos WHERE id=? AND deleted_at IS NULL`,
+			photoID).Scan(&curNode, &sha)
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("store: move photo lookup: %w", err)
+		}
+		if curNode == targetNodeID {
+			return nil // 已在目标节点，无操作
+		}
+
+		var exists int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM nodes WHERE id=? AND deleted_at IS NULL`,
+			targetNodeID).Scan(&exists); err != nil {
+			return fmt.Errorf("store: move photo target: %w", err)
+		}
+		if exists == 0 {
+			return ErrNotFound
+		}
+
+		// 目标节点已有同一张图 → 移动会撞唯一索引，交给上层报 409
+		if sha.Valid {
+			var dup int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM photos
+				 WHERE node_id=? AND sha256=? AND deleted_at IS NULL`,
+				targetNodeID, sha.String).Scan(&dup); err != nil {
+				return fmt.Errorf("store: move photo dup check: %w", err)
+			}
+			if dup > 0 {
+				return ErrDuplicate
+			}
+		}
+
+		var maxOrd sql.NullInt64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT MAX(ord) FROM photos WHERE node_id=? AND deleted_at IS NULL`,
+			targetNodeID).Scan(&maxOrd); err != nil {
+			return fmt.Errorf("store: move photo ord: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE photos SET node_id=?, ord=?, updated_at=? WHERE id=?`,
+			targetNodeID, maxOrd.Int64+100, now, photoID); err != nil {
+			return fmt.Errorf("store: move photo: %w", err)
+		}
+		return nil
+	})
+}
+
 // SoftDeletePhoto 软删照片。
 func (s *Store) SoftDeletePhoto(ctx context.Context, id, now string) error {
 	res, err := s.writer.ExecContext(ctx,

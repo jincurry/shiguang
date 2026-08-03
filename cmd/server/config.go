@@ -31,6 +31,8 @@ type config struct {
 	PixelLimitMP  int64
 	TrashTTLDays  int
 	Workers       int
+	GlobalRPS     int64
+	UploadRPM     int64
 }
 
 func envOr(key, def string) string {
@@ -68,6 +70,7 @@ const configExample = `配置示例：
   SG_BLOB_DRIVER=local
   SG_BLOB_LOCAL_ROOT=data/blobs
   SG_SIGN_SECRET=another-random-secret               （SG_PUBLIC_READ=false 时必填）
+  SG_LIMIT_UPLOAD_RPM=120                            （批量导入可调高，见 README）
   # s3 模式追加：
   SG_S3_ENDPOINT=http://minio:9000  SG_S3_BUCKET=shiguang  SG_S3_REGION=us-east-1
   SG_S3_AK=...  SG_S3_SK=...  SG_S3_PATH_STYLE=true  SG_S3_CDN_BASE=`
@@ -144,6 +147,15 @@ func loadConfig() (*config, error) {
 	cfg.Workers = int(workers)
 	if cfg.Workers <= 0 {
 		cfg.Workers = runtime.NumCPU()
+	}
+	if cfg.GlobalRPS, err = envInt("SG_LIMIT_GLOBAL_RPS", 50); err != nil {
+		return nil, err
+	}
+	if cfg.UploadRPM, err = envInt("SG_LIMIT_UPLOAD_RPM", 120); err != nil {
+		return nil, err
+	}
+	if cfg.GlobalRPS <= 0 || cfg.UploadRPM <= 0 {
+		return nil, fmt.Errorf("SG_LIMIT_GLOBAL_RPS 与 SG_LIMIT_UPLOAD_RPM 必须为正整数\n%s", configExample)
 	}
 	return cfg, nil
 }

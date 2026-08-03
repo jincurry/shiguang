@@ -26,6 +26,8 @@ type Server struct {
 	localBlob  *blob.Local // 非 nil 表示 local 模式，/img 走文件直出
 	index      []byte
 	admin      []byte
+	globalRPS  float64
+	uploadRPM  float64
 }
 
 // Options 是 Server 构造参数。
@@ -36,10 +38,22 @@ type Options struct {
 	LocalBlob  *blob.Local // local 模式传入，s3 模式为 nil
 	IndexHTML  []byte
 	AdminHTML  []byte
+	// GlobalRPS 全局令牌桶速率（每秒），0 用默认 50。
+	GlobalRPS float64
+	// UploadRPM 上传端点速率（每分钟），0 用默认 120。
+	// 批量导入场景（sgctl / 后台拖整个文件夹）需要显著高于单张手工上传，
+	// 上传 handler 本身只做落盘 + 入队，真正的 CPU 消耗由 worker 池自行限流。
+	UploadRPM float64
 }
 
 // New 创建 Server。
 func New(svc *service.Service, log *slog.Logger, opt Options) *Server {
+	if opt.GlobalRPS <= 0 {
+		opt.GlobalRPS = 50
+	}
+	if opt.UploadRPM <= 0 {
+		opt.UploadRPM = 120
+	}
 	return &Server{
 		svc:        svc,
 		log:        log,
@@ -49,6 +63,8 @@ func New(svc *service.Service, log *slog.Logger, opt Options) *Server {
 		localBlob:  opt.LocalBlob,
 		index:      opt.IndexHTML,
 		admin:      opt.AdminHTML,
+		globalRPS:  opt.GlobalRPS,
+		uploadRPM:  opt.UploadRPM,
 	}
 }
 
@@ -57,9 +73,10 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestID, recoverer(s.log), accessLog(s.log))
 
-	// 全局令牌桶 50 rps；上传端点额外 10 次/分钟
-	global := rateLimit(newBucket(50, 100))
-	uploadLimit := rateLimit(newBucket(10.0/60.0, 10))
+	// 全局令牌桶（默认 50 rps）；上传端点额外一层（默认 120 次/分钟）。
+	// burst 给到速率的一半，让批量导入的并发首波能一次进桶而不是立刻 429。
+	global := rateLimit(newBucket(s.globalRPS, s.globalRPS*2))
+	uploadLimit := rateLimit(newBucket(s.uploadRPM/60.0, max(10, s.uploadRPM/2)))
 	r.Use(global)
 
 	// 前端两页（embed）

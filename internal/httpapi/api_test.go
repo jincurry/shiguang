@@ -3,7 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
-
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -26,6 +26,11 @@ import (
 const testToken = "test-admin-token"
 
 func newTestServer(t *testing.T, uploadLimitMB int64) *httptest.Server {
+	return newTestServerRPM(t, uploadLimitMB, 0)
+}
+
+// newTestServerRPM 允许指定上传端点限流（次/分钟），0 = 用默认值。
+func newTestServerRPM(t *testing.T, uploadLimitMB int64, uploadRPM float64) *httptest.Server {
 	t.Helper()
 	st, err := store.Open("file:"+t.TempDir()+"/test.db", migrations.FS)
 	if err != nil {
@@ -45,6 +50,7 @@ func newTestServer(t *testing.T, uploadLimitMB int64) *httptest.Server {
 	srv := New(svc, log, Options{
 		AdminToken: testToken, PublicRead: true,
 		IndexHTML: []byte("<html>index</html>"), AdminHTML: []byte("<html>admin</html>"),
+		UploadRPM: uploadRPM,
 	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -108,8 +114,8 @@ func TestAuth(t *testing.T) {
 }
 
 func TestUploadRateLimit429(t *testing.T) {
-	ts := newTestServer(t, 30)
-	// 上传端点 10 次/分钟：第 11 次必须 429 + Retry-After
+	// 显式配置 10 次/分钟（burst 10）：第 11 次必须 429 + Retry-After
+	ts := newTestServerRPM(t, 30, 10)
 	var last *http.Response
 	for i := 0; i < 11; i++ {
 		res, _ := doJSON(t, "POST", ts.URL+"/api/v1/uploads/presign", testToken,
@@ -123,6 +129,111 @@ func TestUploadRateLimit429(t *testing.T) {
 	if last.Header.Get("Retry-After") == "" {
 		t.Error("429 must carry Retry-After")
 	}
+}
+
+// TestBulkUploadBurstNotLimited 回归：默认限流必须扛得住批量导入的并发首波。
+// 旧默认（10 次/分钟 burst 10）会让拖入 50 张的第 11 张起全部 429。
+func TestBulkUploadBurstNotLimited(t *testing.T) {
+	ts := newTestServer(t, 30) // 默认 120/min，burst 60
+	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-01-01", "title": "批量"})
+	nodeID, _ := node["id"].(string)
+
+	var jbuf bytes.Buffer
+	jpeg.Encode(&jbuf, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil)
+
+	for i := 0; i < 50; i++ {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, _ := mw.CreateFormFile("file", fmt.Sprintf("p%d.jpg", i))
+		// 每张内容不同，避免命中同节点秒传 409
+		fw.Write(jbuf.Bytes())
+		fw.Write(bytes.Repeat([]byte{byte(i)}, i+1))
+		mw.Close()
+		req, _ := http.NewRequest("POST", ts.URL+"/api/v1/nodes/"+nodeID+"/photos", &buf)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode == 429 {
+			t.Fatalf("upload %d/50 hit rate limit under default config", i+1)
+		}
+		if res.StatusCode != 202 {
+			t.Fatalf("upload %d/50: %d", i+1, res.StatusCode)
+		}
+	}
+}
+
+func TestMovePhotoBetweenNodes(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, nodeA := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-01-01", "title": "A"})
+	_, nodeB := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-02-02", "title": "B"})
+	idA, _ := nodeA["id"].(string)
+	idB, _ := nodeB["id"].(string)
+
+	var jbuf bytes.Buffer
+	jpeg.Encode(&jbuf, image.NewRGBA(image.Rect(0, 0, 20, 20)), nil)
+	photoID := uploadTestPhoto(t, ts, idA, "move-me.jpg", jbuf.Bytes())
+
+	// 移动到 B
+	res, data := doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+photoID, testToken,
+		map[string]string{"node_id": idB})
+	if res.StatusCode != 200 {
+		t.Fatalf("move: %d %v", res.StatusCode, data)
+	}
+	_, nodeBFull := doJSON(t, "GET", ts.URL+"/api/v1/nodes/"+idB, testToken, nil)
+	if int(nodeBFull["photo_count"].(float64)) != 1 {
+		t.Errorf("target node should have the photo: %v", nodeBFull)
+	}
+	_, nodeAFull := doJSON(t, "GET", ts.URL+"/api/v1/nodes/"+idA, testToken, nil)
+	if int(nodeAFull["photo_count"].(float64)) != 0 {
+		t.Errorf("source node should be empty: %v", nodeAFull)
+	}
+
+	// 目标节点已有同一张图 → 409
+	same := uploadTestPhoto(t, ts, idA, "same.jpg", jbuf.Bytes())
+	res, data = doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+same, testToken,
+		map[string]string{"node_id": idB})
+	if res.StatusCode != 409 || data["code"] != "CONFLICT_DUPLICATE" {
+		t.Errorf("move duplicate into target: %d %v", res.StatusCode, data)
+	}
+
+	// 目标节点不存在 → 404
+	res, _ = doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+same, testToken,
+		map[string]string{"node_id": "01NOPE"})
+	if res.StatusCode != 404 {
+		t.Errorf("move to missing node: %d", res.StatusCode)
+	}
+}
+
+// uploadTestPhoto 上传一张图并返回 photo id。
+func uploadTestPhoto(t *testing.T, ts *httptest.Server, nodeID, name string, data []byte) string {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", name)
+	fw.Write(data)
+	mw.Close()
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/nodes/"+nodeID+"/photos", &buf)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var p map[string]any
+	json.NewDecoder(res.Body).Decode(&p)
+	if res.StatusCode != 202 {
+		t.Fatalf("upload %s: %d %v", name, res.StatusCode, p)
+	}
+	id, _ := p["id"].(string)
+	return id
 }
 
 func TestMultipartTooLarge413(t *testing.T) {
