@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>拾光集 · 暗房工作台</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500&display=swap');
+  /* 不加载网络字体：CSS @import 是渲染阻塞的，fonts.googleapis.com 在部分
+     网络环境不可达时会让整页白屏干等十几秒。下面的字体栈已覆盖
+     macOS(PingFang/Songti)、Windows(微软雅黑/宋体)、iOS、Android 中文系统。 */
   :root{
     --bg:#161310; --bg-soft:#1D1915; --panel:#1A1613;
     --ivory:#EDE5D8; --muted:#9A8E7E; --faint:#5E564A;

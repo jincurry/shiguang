@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -464,5 +465,58 @@ func TestLongFilenameCaptionClamped(t *testing.T) {
 		map[string]string{"caption": strings.Repeat("b", 201)})
 	if res.StatusCode != 422 || data["code"] != "VALIDATION_FAILED" {
 		t.Errorf("explicit over-long caption: %d %v", res.StatusCode, data)
+	}
+}
+
+// TestImgNotThrottledByAPILimit 回归：一个节点展开就是几百个 /img 请求，
+// 不能让 API 的 50 rps 限流把自己相册的图片挡掉（浏览器会当成加载失败，
+// 在好照片上盖出「曝光失败」章）。
+func TestImgNotThrottledByAPILimit(t *testing.T) {
+	st, err := store.Open("file:"+t.TempDir()+"/test.db", migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	local, err := blob.NewLocal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	svc := service.New(service.Config{
+		BlobDriver: "local", PublicRead: true,
+		UploadLimitMB: 30, PixelLimitMP: 60, TrashTTLDays: 7,
+	}, st, local, log)
+	pool := imgproc.NewPool(1, svc.ProcessPhoto, log)
+	svc.AttachPool(pool)
+	t.Cleanup(pool.Close)
+
+	// 直接放一个变体对象，绕开上传管线
+	key := "var/ab/cd/" + strings.Repeat("a", 64) + "/thumb.webp"
+	if err := local.Put(context.Background(), key,
+		bytes.NewReader([]byte("fake-webp-bytes")), 15, "image/webp"); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := New(svc, log, Options{
+		AdminToken: testToken, PublicRead: true, LocalBlob: local,
+		IndexHTML: []byte("<html>i</html>"), AdminHTML: []byte("<html>a</html>"),
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// 200 次连续取图（相当于展开一个 200 张的节点），一个 429 都不该有
+	for i := 0; i < 200; i++ {
+		res, err := http.Get(ts.URL + "/img/" + key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode == 429 {
+			t.Fatalf("image %d/200 was rate limited — gallery must not throttle its own images", i+1)
+		}
+		if res.StatusCode != 200 {
+			t.Fatalf("image %d/200: %d", i+1, res.StatusCode)
+		}
 	}
 }

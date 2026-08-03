@@ -41,7 +41,7 @@ docker compose up -d
 | `SG_TRASH_TTL_DAYS` | `7` | 回收站保留天数 |
 | `SG_WORKERS` | `0` | 处理 worker 数，0=NumCPU |
 | `SG_LIMIT_GLOBAL_RPS` | `50` | 全局限流（次/秒） |
-| `SG_LIMIT_UPLOAD_RPM` | `120` | 上传端点限流（次/分钟）。批量导入几千张时可调到 `600` |
+| `SG_LIMIT_UPLOAD_RPM` | `600` | 上传端点限流（次/分钟） |
 
 启动即校验：缺必填项 fail-fast 并打印配置示例。
 

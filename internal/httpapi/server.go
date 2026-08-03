@@ -40,9 +40,10 @@ type Options struct {
 	AdminHTML  []byte
 	// GlobalRPS 全局令牌桶速率（每秒），0 用默认 50。
 	GlobalRPS float64
-	// UploadRPM 上传端点速率（每分钟），0 用默认 120。
-	// 批量导入场景（sgctl / 后台拖整个文件夹）需要显著高于单张手工上传，
-	// 上传 handler 本身只做落盘 + 入队，真正的 CPU 消耗由 worker 池自行限流。
+	// UploadRPM 上传端点速率（每分钟），0 用默认 600。
+	// 上传 handler 只做落盘 + 入队（I/O 廉价），真正的 CPU 消耗由 worker 池
+	// 自行限流，所以这里不需要卡得很死——卡死只会阻碍正常的批量导入：
+	// 实测 120/min 下导 200 张会产生 400+ 次 429。
 	UploadRPM float64
 }
 
@@ -52,7 +53,7 @@ func New(svc *service.Service, log *slog.Logger, opt Options) *Server {
 		opt.GlobalRPS = 50
 	}
 	if opt.UploadRPM <= 0 {
-		opt.UploadRPM = 120
+		opt.UploadRPM = 600
 	}
 	return &Server{
 		svc:        svc,
@@ -73,56 +74,68 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(requestID, recoverer(s.log), accessLog(s.log))
 
-	// 全局令牌桶（默认 50 rps）；上传端点额外一层（默认 120 次/分钟）。
-	// burst 给到速率的一半，让批量导入的并发首波能一次进桶而不是立刻 429。
-	global := rateLimit(newBucket(s.globalRPS, s.globalRPS*2))
-	uploadLimit := rateLimit(newBucket(s.uploadRPM/60.0, max(10, s.uploadRPM/2)))
-	r.Use(global)
-
-	// 前端两页（embed）
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(s.index)
-	})
-	r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(s.admin)
-	})
-
-	r.Get("/healthz", s.handleHealthz)
+	// 变体图片单独限流，且远高于 API：一个节点展开就是几百个 /img 请求，
+	// 套用 API 的 50 rps 会让相册限流自己的图片——浏览器收到 429 后
+	// onerror 触发，好照片上会盖出"曝光失败"章。这些是 immutable 缓存资源，
+	// 真要控带宽应放在反向代理/CDN 层，而不是靠 API 预算。
 	if s.localBlob != nil {
-		r.Get("/img/*", s.handleImg)
-		r.Head("/img/*", s.handleImg)
+		imgLimit := rateLimit(newBucket(500, 1000))
+		r.Group(func(g chi.Router) {
+			g.Use(imgLimit)
+			g.Get("/img/*", s.handleImg)
+			g.Head("/img/*", s.handleImg)
+		})
 	}
 
-	r.Route("/api/v1", func(api chi.Router) {
-		// 读接口
-		api.Group(func(g chi.Router) {
-			g.Use(s.readAuth)
-			g.Get("/timeline", s.handleTimeline)
-			g.Get("/nodes/{id}", s.handleGetNode)
-			g.Get("/photos/{id}", s.handleGetPhoto)
-			g.Get("/stats", s.handleStats)
+	// 其余路由走全局令牌桶（默认 50 rps）；上传端点再叠一层（默认 600 次/分钟）。
+	// burst 给到速率的两倍，让批量导入的并发首波能一次进桶而不是立刻 429。
+	global := rateLimit(newBucket(s.globalRPS, s.globalRPS*2))
+	uploadLimit := rateLimit(newBucket(s.uploadRPM/60.0, max(10, s.uploadRPM/2)))
+
+	r.Group(func(r chi.Router) {
+		r.Use(global)
+
+		// 前端两页（embed）
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(s.index)
 		})
-		// 写接口（管理员）
-		api.Group(func(g chi.Router) {
-			g.Use(s.requireAuth)
-			g.Post("/nodes", s.handleCreateNode)
-			g.Patch("/nodes/{id}", s.handlePatchNode)
-			g.Delete("/nodes/{id}", s.handleDeleteNode)
-			g.Post("/nodes/{id}/restore", s.handleRestoreNode)
-			g.Put("/nodes/{id}/photos/order", s.handleReorder)
-			g.Patch("/photos/{id}", s.handlePatchPhoto)
-			g.Delete("/photos/{id}", s.handleDeletePhoto)
-			g.Post("/photos/{id}/restore", s.handleRestorePhoto)
-			g.Post("/photos/{id}/reprocess", s.handleReprocess)
-			g.Get("/trash", s.handleTrash)
-			// 上传端点：单独限流 10 次/分钟
-			g.Group(func(u chi.Router) {
-				u.Use(uploadLimit)
-				u.Post("/nodes/{id}/photos", s.handleUploadLocal)
-				u.Post("/uploads/presign", s.handlePresign)
-				u.Post("/photos/{id}/confirm", s.handleConfirm)
+		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(s.admin)
+		})
+
+		r.Get("/healthz", s.handleHealthz)
+
+		r.Route("/api/v1", func(api chi.Router) {
+			// 读接口
+			api.Group(func(g chi.Router) {
+				g.Use(s.readAuth)
+				g.Get("/timeline", s.handleTimeline)
+				g.Get("/nodes/{id}", s.handleGetNode)
+				g.Get("/photos/{id}", s.handleGetPhoto)
+				g.Get("/stats", s.handleStats)
+			})
+			// 写接口（管理员）
+			api.Group(func(g chi.Router) {
+				g.Use(s.requireAuth)
+				g.Post("/nodes", s.handleCreateNode)
+				g.Patch("/nodes/{id}", s.handlePatchNode)
+				g.Delete("/nodes/{id}", s.handleDeleteNode)
+				g.Post("/nodes/{id}/restore", s.handleRestoreNode)
+				g.Put("/nodes/{id}/photos/order", s.handleReorder)
+				g.Patch("/photos/{id}", s.handlePatchPhoto)
+				g.Delete("/photos/{id}", s.handleDeletePhoto)
+				g.Post("/photos/{id}/restore", s.handleRestorePhoto)
+				g.Post("/photos/{id}/reprocess", s.handleReprocess)
+				g.Get("/trash", s.handleTrash)
+				// 上传端点：单独限流 10 次/分钟
+				g.Group(func(u chi.Router) {
+					u.Use(uploadLimit)
+					u.Post("/nodes/{id}/photos", s.handleUploadLocal)
+					u.Post("/uploads/presign", s.handlePresign)
+					u.Post("/photos/{id}/confirm", s.handleConfirm)
+				})
 			})
 		})
 	})
