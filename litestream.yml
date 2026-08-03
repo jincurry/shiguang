@@ -1,0 +1,12 @@
+# litestream 复制配置：把 SQLite 主库实时备份到任意 S3 兼容存储。
+# 凭证经 compose 注入 LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY。
+dbs:
+  - path: /data/shiguang.db
+    replicas:
+      - type: s3
+        bucket: shiguang-backup          # 改成你的备份桶
+        path: shiguang.db
+        endpoint: ""                     # 兼容 MinIO 时填 http://minio:9000
+        force-path-style: true
+        sync-interval: 10s
+        retention: 720h                  # 备份保留 30 天

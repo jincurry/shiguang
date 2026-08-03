@@ -1,0 +1,70 @@
+# 拾光集部署编排
+#
+# 默认（local 模式 + litestream 备份）：
+#   cp .env.example .env && 编辑 token/密钥
+#   docker compose up -d
+#
+# s3 模式（自带 MinIO 演示）：
+#   docker compose --profile s3 up -d
+#   并在 .env 里设置 SG_BLOB_DRIVER=s3 与 SG_S3_* 各项
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SG_ADDR: ":8080"
+      SG_DB_DSN: "file:/data/shiguang.db"
+      SG_ADMIN_TOKEN: "${SG_ADMIN_TOKEN:?请在 .env 设置 SG_ADMIN_TOKEN}"
+      SG_PUBLIC_READ: "${SG_PUBLIC_READ:-true}"
+      SG_BLOB_DRIVER: "${SG_BLOB_DRIVER:-local}"
+      SG_BLOB_LOCAL_ROOT: "/data/blobs"
+      SG_SIGN_SECRET: "${SG_SIGN_SECRET:-}"
+      SG_S3_ENDPOINT: "${SG_S3_ENDPOINT:-}"
+      SG_S3_BUCKET: "${SG_S3_BUCKET:-}"
+      SG_S3_REGION: "${SG_S3_REGION:-us-east-1}"
+      SG_S3_AK: "${SG_S3_AK:-}"
+      SG_S3_SK: "${SG_S3_SK:-}"
+      SG_S3_PATH_STYLE: "${SG_S3_PATH_STYLE:-true}"
+      SG_S3_CDN_BASE: "${SG_S3_CDN_BASE:-}"
+      SG_LIMIT_UPLOAD_MB: "${SG_LIMIT_UPLOAD_MB:-30}"
+      SG_LIMIT_PIXELS_MP: "${SG_LIMIT_PIXELS_MP:-60}"
+      SG_TRASH_TTL_DAYS: "${SG_TRASH_TTL_DAYS:-7}"
+      SG_WORKERS: "${SG_WORKERS:-0}"
+    volumes:
+      - data:/data
+
+  # litestream：SQLite 实时流式备份（WAL 复制），恢复见 README「备份恢复手册」
+  litestream:
+    image: litestream/litestream:0.3
+    restart: unless-stopped
+    command: replicate -config /etc/litestream.yml
+    environment:
+      LITESTREAM_ACCESS_KEY_ID: "${BACKUP_S3_AK:-}"
+      LITESTREAM_SECRET_ACCESS_KEY: "${BACKUP_S3_SK:-}"
+    volumes:
+      - data:/data
+      - ./litestream.yml:/etc/litestream.yml:ro
+    depends_on:
+      - app
+
+  # 可选：本地 MinIO，用于 s3 模式（--profile s3 启用）
+  minio:
+    image: minio/minio:latest
+    profiles: ["s3"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+volumes:
+  data:
+  minio-data:

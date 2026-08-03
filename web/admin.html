@@ -362,7 +362,7 @@
       <input type="password" id="token" placeholder="ADMIN TOKEN" autocomplete="current-password">
       <button class="btn" type="submit">拉灯 · 进入暗房</button>
     </form>
-    <p class="hint">原型演示：任意 ≥ 8 位字符即可进入</p>
+    <p class="hint">口令即部署时设置的 SG_ADMIN_TOKEN</p>
   </div>
 </div>
 
@@ -414,121 +414,211 @@
 <div id="toasts"></div>
 
 <script>
-/* ================= 状态（原型：内存态） ================= */
-const G=(a,b)=>`linear-gradient(150deg,${a},${b})`;
-let seq=100;
-const uid=()=> 'p'+(++seq);
-const state={
-  nodes:[
-    {id:'n1',date:'2026-05-21',title:'黄山两日',desc:'云海来得比预报早，日出在光明顶。',photos:[
-      {id:uid(),cap:'云海翻涌',bg:G('#8FA6B8','#EFE7D6'),st:'ready'},
-      {id:uid(),cap:'迎客松',bg:G('#33402F','#A9BC8F'),st:'ready'},
-      {id:uid(),cap:'日出前的蓝',bg:G('#1E2A44','#C98A6B'),st:'ready'},
-    ]},
-    {id:'n2',date:'2026-02-14',title:'家里的年夜饭',desc:'今年轮到我掌勺。',photos:[
-      {id:uid(),cap:'一桌菜',bg:G('#6E1423','#DB8A5A'),st:'ready'},
-      {id:uid(),cap:'贴春联',bg:G('#7F1D1D','#E8B77E'),st:'ready'},
-    ]},
-    {id:'n3',date:'2025-10-03',title:'川西环线自驾',desc:'四姑娘山到色达。',photos:[
-      {id:uid(),cap:'牧场黄昏',bg:G('#7A4A28','#F2DDB4'),st:'ready'},
-    ]},
-  ],
-  trash:[], sel:null,
-};
+/* ================= API 层 ================= */
+const API = '/api/v1';
+const token = () => sessionStorage.getItem('sg_token') || '';
 
-/* ================= 工具 ================= */
-const $=s=>document.querySelector(s);
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(msg,cls=''){
-  const t=document.createElement('div');t.className='toast '+cls;t.textContent=msg;
-  $('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity=0;t.style.transition='opacity .4s';
-    setTimeout(()=>t.remove(),400);},2400);
+/* api：统一带 Bearer、统一 401 拦截弹回登录、错误抛 {status,data} */
+async function api(path, opt = {}){
+  const headers = Object.assign({'Authorization': 'Bearer ' + token()}, opt.headers || {});
+  let body = opt.body;
+  if(body && !(body instanceof FormData) && typeof body !== 'string'){
+    body = JSON.stringify(body);
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(API + path, Object.assign({}, opt, {headers, body}));
+  if(res.status === 401 && document.body.classList.contains('in-app')){
+    logout();
+    toast('登录已失效，请重新出示口令', 'err');
+  }
+  if(res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok) throw {status: res.status, data};
+  return data;
 }
-function confirmBox(title,body){
-  return new Promise(res=>{
-    $('#mTitle').textContent=title;$('#mBody').textContent=body;
-    $('#modal').classList.add('on');
-    const done=v=>{ $('#modal').classList.remove('on');ok.onclick=cc.onclick=null;res(v); };
-    const ok=$('#mOk'),cc=$('#mCancel');
-    ok.onclick=()=>done(true);cc.onclick=()=>done(false);
+
+/* XHR 上传：upload.onprogress 驱动原型进度条 */
+function xhrUpload(method, url, body, onProgress, headers = {}){
+  return new Promise((res, rej) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    for(const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = e => { if(e.lengthComputable) onProgress(e.loaded / e.total * 100); };
+    xhr.onload = () => {
+      let data = {};
+      try{ data = JSON.parse(xhr.responseText || '{}'); }catch(_){}
+      if(xhr.status >= 200 && xhr.status < 300) res(data);
+      else rej({status: xhr.status, data});
+    };
+    xhr.onerror = () => rej({status: 0, data: {message: '网络错误'}});
+    xhr.send(body);
   });
 }
-const node=id=>state.nodes.find(n=>n.id===id);
 
-/* ================= 主题切换（登录页拉绳 + 工作台顶栏按钮，同一处理器） ================= */
-const cord=$('#cord'), themeBtn=$('#themeBtn');
+/* ================= 状态 ================= */
+const state = {
+  nodes: [],    // {id,date,title,desc,photos:[{id,cap,st,fail,bg,variants,prog,_file}]}
+  trash: [],    // GET /trash items
+  sel: null,
+  mode: 'local' // 由 GET /stats 的 upload_mode 决定上传路径
+};
+
+function mapPhoto(p){
+  return {
+    id: p.id, cap: p.caption, st: p.status, fail: p.fail_reason,
+    variants: p.variants || {},
+    bg: p.variants && p.variants.thumb ? `url('${p.variants.thumb}')` : ''
+  };
+}
+function mapNode(n){
+  return {id: n.id, date: n.date, title: n.title, desc: n.description,
+          photos: (n.photos || []).map(mapPhoto)};
+}
+
+/* 管理端取全量：大 limit 循环翻页 */
+async function loadAll(){
+  const nodes = [];
+  let cursor = null;
+  do{
+    const q = cursor ? `/timeline?limit=50&cursor=${encodeURIComponent(cursor)}` : '/timeline?limit=50';
+    const d = await api(q);
+    d.items.forEach(n => nodes.push(mapNode(n)));
+    cursor = d.next_cursor;
+  }while(cursor);
+  state.nodes = nodes;
+  state.trash = (await api('/trash')).items;
+  nodes.forEach(n => n.photos.forEach(p => watch(p, n)));
+}
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cssq = s => (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&');
+function toast(msg, cls = ''){
+  const t = document.createElement('div'); t.className = 'toast ' + cls; t.textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = 0; t.style.transition = 'opacity .4s';
+    setTimeout(() => t.remove(), 400); }, 2400);
+}
+function errMsg(err, fallback){
+  return (err && err.data && err.data.message) ? err.data.message : fallback;
+}
+function confirmBox(title, body){
+  return new Promise(res => {
+    $('#mTitle').textContent = title; $('#mBody').textContent = body;
+    $('#modal').classList.add('on');
+    const done = v => { $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null; res(v); };
+    const ok = $('#mOk'), cc = $('#mCancel');
+    ok.onclick = () => done(true); cc.onclick = () => done(false);
+  });
+}
+const node = id => state.nodes.find(n => n.id === id);
+
+/* ================= 主题切换（与前台共用 localStorage 键 sg_theme） ================= */
+const cord = $('#cord'), themeBtn = $('#themeBtn');
+if(localStorage.getItem('sg_theme') === 'light') document.body.classList.add('light');
 function syncThemeBtn(){
-  const light=document.body.classList.contains('light');
-  themeBtn.querySelector('.ic').textContent = light?'🌙':'🔆';
-  themeBtn.querySelector('.tx').textContent = light?'关灯':'开灯';
-  themeBtn.setAttribute('aria-pressed',light);
-  cord.setAttribute('aria-pressed',light);
+  const light = document.body.classList.contains('light');
+  themeBtn.querySelector('.ic').textContent = light ? '🌙' : '🔆';
+  themeBtn.querySelector('.tx').textContent = light ? '关灯' : '开灯';
+  themeBtn.setAttribute('aria-pressed', light);
+  cord.setAttribute('aria-pressed', light);
 }
 function toggleTheme(){
-  const light=document.body.classList.toggle('light');
-  cord.classList.remove('pulled');void cord.offsetWidth;cord.classList.add('pulled');
+  const light = document.body.classList.toggle('light');
+  localStorage.setItem('sg_theme', light ? 'light' : 'dark');
+  cord.classList.remove('pulled'); void cord.offsetWidth; cord.classList.add('pulled');
   syncThemeBtn();
-  toast(light?'已开灯 · 亮色相纸间':'已关灯 · 回到暗房','ok');
+  toast(light ? '已开灯 · 亮色相纸间' : '已关灯 · 回到暗房', 'ok');
 }
-cord.addEventListener('click',toggleTheme);
-themeBtn.addEventListener('click',toggleTheme);
+cord.addEventListener('click', toggleTheme);
+themeBtn.addEventListener('click', toggleTheme);
 syncThemeBtn();
 
-/* ================= 登录 ================= */
-$('#loginForm').addEventListener('submit',e=>{
+/* ================= 登录：GET /stats 带 Bearer 验证口令 ================= */
+async function enterApp(){
+  const stats = await api('/stats');      // 401 会被 throw
+  state.mode = stats.upload_mode || 'local';
+  await loadAll();
+  $('#login').classList.remove('on'); $('#app').classList.add('on');
+  document.body.classList.add('in-app');
+  state.sel = state.nodes[0]?.id || null;
+  renderAll();
+}
+$('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const v=$('#token').value.trim();
-  if(v.length<8){
-    $('#token').classList.add('err');toast('口令不足 8 位','err');
-    setTimeout(()=>$('#token').classList.remove('err'),450);return;
+  const v = $('#token').value.trim();
+  if(!v){
+    $('#token').classList.add('err'); toast('请输入口令', 'err');
+    setTimeout(() => $('#token').classList.remove('err'), 450);
+    return;
   }
-  $('#door').classList.add('lit');
-  setTimeout(()=>{ $('#login').classList.remove('on');$('#app').classList.add('on');
-    document.body.classList.add('in-app');
-    state.sel=state.nodes[0]?.id||null;renderAll(); },800);
+  sessionStorage.setItem('sg_token', v);
+  try{
+    $('#door').classList.add('lit');
+    await new Promise(r => setTimeout(r, 300));   // 灯先亮一下
+    await enterApp();
+  }catch(err){
+    sessionStorage.removeItem('sg_token');
+    $('#door').classList.remove('lit');
+    $('#token').classList.add('err');
+    toast(err.status === 401 ? '口令无效' : errMsg(err, '连接失败，请稍后重试'), 'err');
+    setTimeout(() => $('#token').classList.remove('err'), 450);
+  }
 });
-$('#logoutBtn').addEventListener('click',()=>{
-  $('#app').classList.remove('on');$('#login').classList.add('on');
+function logout(){
+  sessionStorage.removeItem('sg_token');
+  $('#app').classList.remove('on'); $('#login').classList.add('on');
   document.body.classList.remove('in-app');
-  $('#door').classList.remove('lit');$('#token').value='';
-});
+  $('#door').classList.remove('lit'); $('#token').value = '';
+}
+$('#logoutBtn').addEventListener('click', logout);
+/* 已有会话（刷新页面）自动进入 */
+if(token()){ enterApp().catch(() => sessionStorage.removeItem('sg_token')); }
 
 /* ================= 渲染 ================= */
-function renderAll(){renderList();renderDetail();renderStats();renderTrashBadge();}
+function renderAll(){ renderList(); renderDetail(); renderStats(); renderTrashBadge(); }
 function renderStats(){
-  const p=state.nodes.reduce((a,n)=>a+n.photos.length,0);
-  $('#stats').innerHTML=`<b>${state.nodes.length}</b> 节点 · <b>${p}</b> 相纸`;
+  const p = state.nodes.reduce((a, n) => a + n.photos.length, 0);
+  const el = $('#stats');
+  el.textContent = '';
+  const b1 = document.createElement('b'); b1.textContent = state.nodes.length;
+  const b2 = document.createElement('b'); b2.textContent = p;
+  el.append(b1, ' 节点 · ', b2, ' 相纸');
 }
 function renderTrashBadge(){
-  const el=$('#trashCount');el.hidden=!state.trash.length;el.textContent=state.trash.length;
+  const el = $('#trashCount');
+  el.hidden = !state.trash.length;
+  el.textContent = state.trash.length;
 }
 function renderList(){
-  const sorted=[...state.nodes].sort((a,b)=>b.date.localeCompare(a.date));
-  let html='',year='';
-  sorted.forEach(n=>{
-    const y=n.date.slice(0,4);
-    if(y!==year){year=y;html+=`<div class="yearsep">${y}</div>`;}
-    html+=`<button class="n-item ${n.id===state.sel?'sel':''}" data-id="${n.id}">
-      <span class="d">${n.date}</span>
+  const sorted = [...state.nodes].sort((a, b) => b.date.localeCompare(a.date));
+  let html = '', year = '';
+  sorted.forEach(n => {
+    const y = n.date.slice(0, 4);
+    if(y !== year){ year = y; html += `<div class="yearsep">${esc(y)}</div>`; }
+    html += `<button class="n-item ${n.id === state.sel ? 'sel' : ''}" data-id="${esc(n.id)}">
+      <span class="d">${esc(n.date)}</span>
       <span class="t">${esc(n.title)}<span class="c">×${n.photos.length}</span></span>
     </button>`;
   });
-  $('#nodeList').innerHTML=html||'<div class="t-empty">还没有节点</div>';
+  $('#nodeList').innerHTML = html || '<div class="t-empty">还没有节点</div>';
 }
-$('#nodeList').addEventListener('click',e=>{
-  const b=e.target.closest('.n-item');if(!b)return;
-  state.sel=b.dataset.id;renderList();renderDetail();
+$('#nodeList').addEventListener('click', e => {
+  const b = e.target.closest('.n-item'); if(!b) return;
+  state.sel = b.dataset.id; renderList(); renderDetail();
   $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
 });
 
 function renderDetail(){
-  const n=node(state.sel);
-  const d=$('#detail');
-  if(!n){d.innerHTML='<div class="d-empty">← 选择或新建一个节点</div>';return;}
-  d.innerHTML=`
+  const n = node(state.sel);
+  const d = $('#detail');
+  if(!n){ d.innerHTML = '<div class="d-empty">← 选择或新建一个节点</div>'; return; }
+  d.innerHTML = `
     <button class="icon-btn backbtn" id="backList">← 节点列表</button>
     <div class="d-form">
-      <input type="date" id="fDate" value="${n.date}">
+      <input type="date" id="fDate" value="${esc(n.date)}">
       <input type="text" id="fTitle" maxlength="120" value="${esc(n.title)}" placeholder="标题">
       <textarea id="fDesc" maxlength="2000" placeholder="描述">${esc(n.desc)}</textarea>
       <div class="row2">
@@ -554,35 +644,48 @@ function renderDetail(){
     </div>`;
   renderGrid(n);
 
-  $('#backList').onclick=()=>$('#mainView').classList.remove('showDetail');
-  $('#saveNode').onclick=()=>{
-    const t=$('#fTitle').value.trim();
-    if(!t){toast('标题不能为空','err');return;}
-    n.date=$('#fDate').value||n.date;n.title=t;n.desc=$('#fDesc').value;
-    renderList();renderStats();
-    $('#saved').classList.add('show');setTimeout(()=>$('#saved')?.classList.remove('show'),1600);
+  $('#backList').onclick = () => $('#mainView').classList.remove('showDetail');
+  $('#saveNode').onclick = async () => {
+    const t = $('#fTitle').value.trim();
+    if(!t){ toast('标题不能为空', 'err'); return; }
+    try{
+      const upd = await api(`/nodes/${n.id}`, {method: 'PATCH',
+        body: {date: $('#fDate').value || n.date, title: t, description: $('#fDesc').value}});
+      n.date = upd.date; n.title = upd.title; n.desc = upd.description;
+      renderList(); renderStats();
+      $('#saved').classList.add('show');
+      setTimeout(() => $('#saved')?.classList.remove('show'), 1600);
+    }catch(err){
+      toast(errMsg(err, '保存失败'), 'err');
+    }
   };
-  $('#delNode').onclick=async()=>{
-    if(await confirmBox('移入回收站？',`节点「${n.title}」及其 ${n.photos.length} 张照片将进入回收站，7 天内可恢复。`)){
-      state.trash.push({type:'node',data:n,at:Date.now()});
-      state.nodes=state.nodes.filter(x=>x.id!==n.id);
-      state.sel=state.nodes[0]?.id||null;
-      renderAll();toast('已移入回收站','ok');
+  $('#delNode').onclick = async () => {
+    if(await confirmBox('移入回收站？',
+        `节点「${n.title}」及其 ${n.photos.length} 张照片将进入回收站，7 天内可恢复。`)){
+      try{
+        await api(`/nodes/${n.id}`, {method: 'DELETE'});
+        state.nodes = state.nodes.filter(x => x.id !== n.id);
+        state.sel = state.nodes[0]?.id || null;
+        state.trash = (await api('/trash')).items;
+        renderAll(); toast('已移入回收站', 'ok');
+      }catch(err){
+        toast(errMsg(err, '删除失败'), 'err');
+      }
     }
   };
   /* 显影盘 */
-  const tray=$('#tray');
-  ;['dragenter','dragover'].forEach(ev=>tray.addEventListener(ev,e=>{e.preventDefault();tray.classList.add('hover');}));
-  ;['dragleave','drop'].forEach(ev=>tray.addEventListener(ev,e=>{e.preventDefault();tray.classList.remove('hover');}));
-  tray.addEventListener('drop',e=>ingest(n,[...e.dataTransfer.files]));
-  $('#file').addEventListener('change',e=>{ingest(n,[...e.target.files]);e.target.value='';});
+  const tray = $('#tray');
+  ;['dragenter','dragover'].forEach(ev => tray.addEventListener(ev, e => { e.preventDefault(); tray.classList.add('hover'); }));
+  ;['dragleave','drop'].forEach(ev => tray.addEventListener(ev, e => { e.preventDefault(); tray.classList.remove('hover'); }));
+  tray.addEventListener('drop', e => ingest(n, [...e.dataTransfer.files]));
+  $('#file').addEventListener('change', e => { ingest(n, [...e.target.files]); e.target.value = ''; });
 }
 
 function renderGrid(n){
-  const g=$('#grid');
-  g.innerHTML=n.photos.map((p,i)=>`
-    <figure class="card ${i===0?'cover':''} ${p.st==='uploading'?'uploading':''} ${p.st==='failed'?'failed':''}"
-            data-id="${p.id}">
+  const g = $('#grid');
+  g.innerHTML = n.photos.map((p, i) => `
+    <figure class="card ${i === 0 ? 'cover' : ''} ${p.st === 'uploading' ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
+            data-id="${esc(p.id)}">
       <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
       <span class="star">★ 封面</span>
       <div class="ops">
@@ -591,135 +694,274 @@ function renderGrid(n){
         <button data-op="del" title="删除">✕</button>
       </div>
       <div class="ph">
-        <div class="img ${p.st==='ready'?'dev':''}" style="background-image:${p.bg}"></div>
+        <div class="img ${p.st === 'ready' ? 'dev' : ''}" style="background-image:${esc(p.bg)}"></div>
       </div>
-      <span class="statebadge">曝光失败</span>
+      <span class="statebadge" title="${esc(p.fail || '')}">曝光失败</span>
       <button class="retry" data-op="retry">重试</button>
-      <div class="prog"><i style="width:${p.prog||0}%"></i></div>
-      <figcaption class="cap"><i>No.${String(i+1).padStart(2,'0')}</i><b>${esc(p.cap)}</b></figcaption>
+      <div class="prog"><i style="width:${p.prog || 0}%"></i></div>
+      <figcaption class="cap"><i>No.${String(i + 1).padStart(2, '0')}</i><b>${esc(p.cap)}</b></figcaption>
     </figure>`).join('');
   bindCards(n);
 }
 
-/* ================= 上传（模拟真实流程，可用真图） ================= */
-function ingest(n,files){
-  const ok=files.filter(f=>/image\/(jpeg|png|webp)/.test(f.type));
-  if(files.length&&!ok.length){toast('仅支持 jpg / png / webp','err');return;}
-  ok.forEach(f=>{
-    if(f.size>30*1024*1024){toast(`${f.name} 超过 30MB，已拒绝`,'err');return;}
-    const p={id:uid(),cap:f.name.replace(/\.[^.]+$/,''),
-             bg:`url('${URL.createObjectURL(f)}')`,st:'uploading',prog:0};
-    n.photos.push(p);renderGrid(n);renderList();renderStats();
-    simulate(n,p);
+/* ================= 上传（local: multipart / s3: presign→PUT→confirm） ================= */
+function ingest(n, files){
+  const ok = files.filter(f => /image\/(jpeg|png|webp)/.test(f.type));
+  if(files.length && !ok.length){ toast('仅支持 jpg / png / webp', 'err'); return; }
+  ok.forEach(f => {
+    if(f.size > 30 * 1024 * 1024){ toast(`${f.name} 超过 30MB，已拒绝`, 'err'); return; }
+    uploadOne(n, f);
   });
 }
-function simulate(n,p){
-  const tick=setInterval(()=>{
-    p.prog=Math.min(100,p.prog+8+Math.random()*16);
-    const el=document.querySelector(`.card[data-id="${p.id}"] .prog i`);
-    if(el)el.style.width=p.prog+'%';
-    if(p.prog>=100){
-      clearInterval(tick);
-      /* 12% 概率演示失败态 */
-      if(Math.random()<0.12){p.st='failed';renderGrid(n);toast('1 张曝光失败，可重试','err');return;}
-      p.st='processing';renderGrid(n);
-      const img=document.querySelector(`.card[data-id="${p.id}"] .img`);
-      requestAnimationFrame(()=>img&&img.classList.add('dev'));   /* 显影 */
-      setTimeout(()=>{p.st='ready';},1200);
+
+async function uploadOne(n, f, retryP){
+  let p = retryP;
+  if(!p){
+    p = {id: 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+         cap: f.name.replace(/\.[^.]+$/, ''),
+         bg: `url('${URL.createObjectURL(f)}')`,
+         st: 'uploading', prog: 0, _file: f};
+    n.photos.push(p);
+  }else{
+    p.st = 'uploading'; p.prog = 0; p.fail = null;
+  }
+  renderGrid(n); renderList(); renderStats();
+  const onp = pct => {
+    p.prog = pct;
+    const el = document.querySelector(`.card[data-id="${cssq(p.id)}"] .prog i`);
+    if(el) el.style.width = pct + '%';
+  };
+  try{
+    let ph;
+    if(state.mode === 's3'){
+      const pre = await api('/uploads/presign', {method: 'POST',
+        body: {node_id: n.id, filename: f.name, size: f.size, content_type: f.type}});
+      await xhrUpload('PUT', pre.upload_url, f, onp, {'Content-Type': f.type});
+      ph = await api(`/photos/${pre.photo_id}/confirm`, {method: 'POST'});
+    }else{
+      const fd = new FormData();
+      fd.append('file', f);
+      ph = await xhrUpload('POST', `${API}/nodes/${n.id}/photos`, fd, onp,
+        {'Authorization': 'Bearer ' + token()});
     }
-  },120);
+    const file = p._file;
+    Object.assign(p, mapPhoto(ph));
+    p._file = file;
+    renderGrid(n);
+    watch(p, n);                 /* 202 后进入"显影中"，轮询到 ready/failed */
+  }catch(err){
+    if(err.status === 409 && err.data && err.data.photo){
+      /* 秒传：展示已存在的照片 */
+      n.photos = n.photos.filter(x => x.id !== p.id);
+      const exist = mapPhoto(err.data.photo);
+      if(!n.photos.some(x => x.id === exist.id)) n.photos.push(exist);
+      toast('已存在相同照片', 'ok');
+      renderGrid(n); renderList(); renderStats();
+    }else{
+      p.st = 'failed'; p.fail = errMsg(err, '上传失败');
+      renderGrid(n);
+      toast(errMsg(err, '上传失败，可重试'), 'err');
+    }
+  }
+}
+
+/* ================= 显影轮询（3s 直至 ready/failed） ================= */
+const pollMap = new Map();   // photoId -> {p,n}
+let pollT = null;
+function watch(p, n){
+  if(p.st !== 'pending' && p.st !== 'processing') return;
+  pollMap.set(p.id, {p, n});
+  if(!pollT) pollT = setInterval(pollTick, 3000);
+}
+async function pollTick(){
+  for(const [id, {p, n}] of [...pollMap]){
+    try{
+      const d = await api(`/photos/${id}`);
+      if(d.status === 'ready' || d.status === 'failed'){
+        pollMap.delete(id);
+        const file = p._file;
+        Object.assign(p, mapPhoto(d));
+        p._file = file;
+        if(state.sel === n.id) renderGrid(n);
+        if(d.status === 'failed') toast('1 张曝光失败，可重试', 'err');
+      }
+    }catch(err){
+      if(err.status === 404) pollMap.delete(id);
+    }
+  }
+  if(!pollMap.size){ clearInterval(pollT); pollT = null; }
 }
 
 /* ================= 卡片操作 + 拖拽排序 ================= */
+/* 服务端整组重排：排除仍在本地上传中的临时卡片 */
+async function pushOrder(n, prev){
+  const ids = n.photos.filter(p => !String(p.id).startsWith('tmp-')).map(p => p.id);
+  if(!ids.length) return;
+  try{
+    await api(`/nodes/${n.id}/photos/order`, {method: 'PUT', body: {photo_ids: ids}});
+  }catch(err){
+    if(prev){ n.photos = prev; renderGrid(n); }   /* 失败回滚本地顺序 */
+    toast(errMsg(err, '排序失败，已还原'), 'err');
+    throw err;
+  }
+}
+
 function bindCards(n){
-  const g=$('#grid');
-  g.onclick=async e=>{
-    const btn=e.target.closest('button[data-op]');if(!btn)return;
-    const card=e.target.closest('.card');const p=n.photos.find(x=>x.id===card.dataset.id);
-    const op=btn.dataset.op;
-    if(op==='del'){
-      if(await confirmBox('删除这张照片？','将进入回收站，7 天内可恢复。')){
-        state.trash.push({type:'photo',data:p,nodeId:n.id,at:Date.now()});
-        n.photos=n.photos.filter(x=>x.id!==p.id);
-        renderGrid(n);renderList();renderStats();renderTrashBadge();toast('已移入回收站','ok');
+  const g = $('#grid');
+  g.onclick = async e => {
+    const btn = e.target.closest('button[data-op]'); if(!btn) return;
+    const card = e.target.closest('.card');
+    const p = n.photos.find(x => x.id === card.dataset.id);
+    if(!p) return;
+    const op = btn.dataset.op;
+    if(op === 'del'){
+      if(String(p.id).startsWith('tmp-')){
+        n.photos = n.photos.filter(x => x.id !== p.id);
+        renderGrid(n); renderList(); renderStats();
+        return;
       }
-    }else if(op==='cover'){
-      n.photos=[p,...n.photos.filter(x=>x.id!==p.id)];
-      renderGrid(n);toast('已设为封面','ok');
-    }else if(op==='cap'){
-      const b=card.querySelector('.cap b');
-      const inp=document.createElement('input');inp.value=p.cap;inp.maxLength=200;
-      b.replaceWith(inp);inp.focus();inp.select();
-      const commit=()=>{p.cap=inp.value.trim()||p.cap;renderGrid(n);};
-      inp.addEventListener('keydown',ev=>{if(ev.key==='Enter')commit();if(ev.key==='Escape')renderGrid(n);});
-      inp.addEventListener('blur',commit);
-    }else if(op==='retry'){
-      p.st='uploading';p.prog=0;renderGrid(n);simulate(n,p);
+      if(await confirmBox('删除这张照片？', '将进入回收站，7 天内可恢复。')){
+        try{
+          await api(`/photos/${p.id}`, {method: 'DELETE'});
+          n.photos = n.photos.filter(x => x.id !== p.id);
+          state.trash = (await api('/trash')).items;
+          renderGrid(n); renderList(); renderStats(); renderTrashBadge();
+          toast('已移入回收站', 'ok');
+        }catch(err){
+          toast(errMsg(err, '删除失败'), 'err');
+        }
+      }
+    }else if(op === 'cover'){
+      const prev = [...n.photos];
+      n.photos = [p, ...n.photos.filter(x => x.id !== p.id)];
+      renderGrid(n);
+      try{ await pushOrder(n, prev); toast('已设为封面', 'ok'); }catch(_){}
+    }else if(op === 'cap'){
+      const b = card.querySelector('.cap b');
+      const inp = document.createElement('input'); inp.value = p.cap; inp.maxLength = 200;
+      b.replaceWith(inp); inp.focus(); inp.select();
+      let doneFlag = false;
+      const commit = async () => {
+        if(doneFlag) return; doneFlag = true;
+        const val = inp.value.trim();
+        if(!val || val === p.cap){ renderGrid(n); return; }
+        try{
+          const d = await api(`/photos/${p.id}`, {method: 'PATCH', body: {caption: val}});
+          p.cap = d.caption;
+        }catch(err){
+          toast(errMsg(err, '改注失败'), 'err');
+        }
+        renderGrid(n);
+      };
+      inp.addEventListener('keydown', ev => {
+        if(ev.key === 'Enter') commit();
+        if(ev.key === 'Escape'){ doneFlag = true; renderGrid(n); }
+      });
+      inp.addEventListener('blur', commit);
+    }else if(op === 'retry'){
+      if(p._file && (String(p.id).startsWith('tmp-') || !p.id)){
+        uploadOne(n, p._file, p);          /* 上传本身失败：重传 */
+        return;
+      }
+      try{
+        const d = await api(`/photos/${p.id}/reprocess`, {method: 'POST'});
+        Object.assign(p, mapPhoto(d));
+        renderGrid(n); watch(p, n);
+        toast('已重新入显影队列', 'ok');
+      }catch(err){
+        if(p._file){ uploadOne(n, p._file, p); return; }   /* 原图缺失：重新走上传 */
+        toast(errMsg(err, '重试失败'), 'err');
+      }
     }
   };
   /* 木夹把手拖拽排序（pointer 版，桌面/触屏通用） */
-  g.querySelectorAll('.handle').forEach(h=>{
-    h.addEventListener('pointerdown',e=>{
+  g.querySelectorAll('.handle').forEach(h => {
+    h.addEventListener('pointerdown', e => {
       e.preventDefault();
-      const card=h.closest('.card');const from=card.dataset.id;
-      card.classList.add('dragging');h.setPointerCapture(e.pointerId);
-      let target=null;
-      const move=ev=>{
-        const el=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.card');
-        g.querySelectorAll('.card').forEach(c=>c.classList.remove('dropTarget'));
-        target=(el&&el!==card)?el:null;
-        if(target)target.classList.add('dropTarget');
+      const card = h.closest('.card'); const from = card.dataset.id;
+      card.classList.add('dragging'); h.setPointerCapture(e.pointerId);
+      let target = null;
+      const move = ev => {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.card');
+        g.querySelectorAll('.card').forEach(c => c.classList.remove('dropTarget'));
+        target = (el && el !== card) ? el : null;
+        if(target) target.classList.add('dropTarget');
       };
-      const up=()=>{
-        h.removeEventListener('pointermove',move);h.removeEventListener('pointerup',up);
+      const up = async () => {
+        h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up);
         card.classList.remove('dragging');
-        g.querySelectorAll('.card').forEach(c=>c.classList.remove('dropTarget'));
+        g.querySelectorAll('.card').forEach(c => c.classList.remove('dropTarget'));
         if(target){
-          const arr=n.photos;
-          const fi=arr.findIndex(x=>x.id===from), ti=arr.findIndex(x=>x.id===target.dataset.id);
-          const [mv]=arr.splice(fi,1);arr.splice(ti,0,mv);
-          renderGrid(n);toast('顺序已更新','ok');
+          const prev = [...n.photos];
+          const arr = n.photos;
+          const fi = arr.findIndex(x => x.id === from), ti = arr.findIndex(x => x.id === target.dataset.id);
+          const [mv] = arr.splice(fi, 1); arr.splice(ti, 0, mv);
+          renderGrid(n);
+          try{ await pushOrder(n, prev); toast('顺序已更新', 'ok'); }catch(_){}
         }
       };
-      h.addEventListener('pointermove',move);h.addEventListener('pointerup',up);
+      h.addEventListener('pointermove', move); h.addEventListener('pointerup', up);
     });
   });
 }
 
 /* ================= 新建节点 ================= */
-$('#newNode').addEventListener('click',()=>{
-  const n={id:'n'+Date.now(),date:new Date().toISOString().slice(0,10),
-           title:'未命名节点',desc:'',photos:[]};
-  state.nodes.unshift(n);state.sel=n.id;
-  renderAll();$('#mainView').classList.add('showDetail');
-  setTimeout(()=>{$('#fTitle')?.focus();$('#fTitle')?.select();},50);
+$('#newNode').addEventListener('click', async () => {
+  try{
+    const d = await api('/nodes', {method: 'POST',
+      body: {date: new Date().toISOString().slice(0, 10), title: '未命名节点', description: ''}});
+    const n = mapNode(d);
+    state.nodes.unshift(n); state.sel = n.id;
+    renderAll(); $('#mainView').classList.add('showDetail');
+    setTimeout(() => { $('#fTitle')?.focus(); $('#fTitle')?.select(); }, 50);
+  }catch(err){
+    toast(errMsg(err, '新建失败'), 'err');
+  }
 });
 
 /* ================= 回收站 ================= */
-$('#trashBtn').addEventListener('click',()=>{$('#mainView').style.display='none';
-  $('#trashView').style.display='block';renderTrash();});
-$('#trashBack').addEventListener('click',()=>{$('#trashView').style.display='none';
-  $('#mainView').style.display='grid';});
-function daysLeft(at){return Math.max(0,7-Math.floor((Date.now()-at)/86400000));}
+$('#trashBtn').addEventListener('click', async () => {
+  try{ state.trash = (await api('/trash')).items; }catch(_){}
+  renderTrashBadge();
+  $('#mainView').style.display = 'none';
+  $('#trashView').style.display = 'block';
+  renderTrash();
+});
+$('#trashBack').addEventListener('click', () => {
+  $('#trashView').style.display = 'none';
+  $('#mainView').style.display = 'grid';
+});
+function daysLeft(purgeAt){
+  return Math.max(0, Math.ceil((new Date(purgeAt) - Date.now()) / 86400000));
+}
 function renderTrash(){
-  const el=$('#trashList');
-  if(!state.trash.length){el.innerHTML='<div class="t-empty">回收站是空的</div>';return;}
-  el.innerHTML=state.trash.map((t,i)=>`
+  const el = $('#trashList');
+  if(!state.trash.length){ el.innerHTML = '<div class="t-empty">回收站是空的</div>'; return; }
+  el.innerHTML = state.trash.map((t, i) => `
     <div class="t-item">
-      <div class="ty">${t.type==='node'?'节点':'照片'}</div>
-      <div class="nm">${esc(t.type==='node'?t.data.title:t.data.cap)}</div>
-      ${t.type==='node'?`<div class="mono" style="font-size:11px;color:var(--muted)">${t.data.date} · ${t.data.photos.length} 张</div>`:''}
-      <div class="cd">${daysLeft(t.at)} 天后自动清除</div>
+      <div class="ty">${t.type === 'node' ? '节点' : '照片'}</div>
+      <div class="nm">${esc(t.name || '（无题）')}</div>
+      ${t.type === 'node'
+        ? `<div class="mono" style="font-size:11px;color:var(--muted)">${esc(t.extra?.date || '')} · ${Number(t.extra?.photo_count) || 0} 张</div>`
+        : `<div class="mono" style="font-size:11px;color:var(--muted)">来自「${esc(t.extra?.node_title || '')}」</div>`}
+      <div class="cd">${daysLeft(t.purge_at)} 天后自动清除</div>
       <div class="row">
         <button class="btn" style="padding:6px 14px;font-size:12.5px" data-restore="${i}">恢复</button>
       </div>
     </div>`).join('');
-  el.onclick=e=>{
-    const b=e.target.closest('[data-restore]');if(!b)return;
-    const t=state.trash.splice(+b.dataset.restore,1)[0];
-    if(t.type==='node'){state.nodes.push(t.data);}
-    else{(node(t.nodeId)||state.nodes[0])?.photos.push(t.data);}
-    renderAll();renderTrash();toast('已恢复','ok');
+  el.onclick = async e => {
+    const b = e.target.closest('[data-restore]'); if(!b) return;
+    const t = state.trash[+b.dataset.restore]; if(!t) return;
+    try{
+      await api(t.type === 'node' ? `/nodes/${t.id}/restore` : `/photos/${t.id}/restore`,
+                {method: 'POST'});
+      await loadAll();
+      if(!node(state.sel)) state.sel = state.nodes[0]?.id || null;
+      renderAll(); renderTrash();
+      toast('已恢复', 'ok');
+    }catch(err){
+      toast(errMsg(err, '恢复失败'), 'err');
+    }
   };
 }
 </script>
