@@ -189,7 +189,9 @@ func (s *Service) reconcileOrphans(ctx context.Context) error {
 			return nil
 		}
 		// local 驱动有 mtime，直接判龄；其他驱动两阶段标记
-		if lm, ok := s.bl.(interface{ MTime(string) (time.Time, error) }); ok {
+		if lm, ok := s.bl.(interface {
+			MTime(string) (time.Time, error)
+		}); ok {
 			if mt, err := lm.MTime(key); err == nil {
 				if now.Sub(mt) > orphanAge {
 					if err := s.bl.Delete(ctx, key); err == nil {

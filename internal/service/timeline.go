@@ -55,7 +55,9 @@ type TimelineDTO struct {
 }
 
 // Timeline 逆序游标分页：两条 SQL（一页节点 + 批量照片），禁止 N+1。
-func (s *Service) Timeline(ctx context.Context, cursor string, limit int) (*TimelineDTO, error) {
+// withPhotos=false 时只返回节点元数据与 photo_count，不带 photos——
+// 管理后台的左栏列表用它，避免登录时把整库照片都拉下来。
+func (s *Service) Timeline(ctx context.Context, cursor string, limit int, withPhotos bool) (*TimelineDTO, error) {
 	if limit < 1 || limit > 50 {
 		limit = 10
 	}
@@ -74,6 +76,26 @@ func (s *Service) Timeline(ctx context.Context, cursor string, limit int) (*Time
 		c := encodeCursor(nodes[limit-1].Date, nodes[limit-1].ID)
 		next = &c
 	}
+	out := &TimelineDTO{Items: make([]*NodeDTO, 0, len(nodes)), NextCursor: next}
+
+	if !withPhotos {
+		ids := make([]string, len(nodes))
+		for i, n := range nodes {
+			ids[i] = n.ID
+		}
+		counts, err := s.st.PhotoCountsByNodeIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range nodes {
+			out.Items = append(out.Items, &NodeDTO{
+				ID: n.ID, Date: n.Date, Title: n.Title, Description: n.Description,
+				PhotoCount: counts[n.ID], Photos: []*PhotoDTO{},
+			})
+		}
+		return out, nil
+	}
+
 	ids := make([]string, len(nodes))
 	for i, n := range nodes {
 		ids[i] = n.ID
@@ -82,7 +104,6 @@ func (s *Service) Timeline(ctx context.Context, cursor string, limit int) (*Time
 	if err != nil {
 		return nil, err
 	}
-	out := &TimelineDTO{Items: make([]*NodeDTO, 0, len(nodes)), NextCursor: next}
 	for _, n := range nodes {
 		out.Items = append(out.Items, s.nodeDTO(ctx, n, photosByNode[n.ID]))
 	}
@@ -325,6 +346,88 @@ func (s *Service) PatchPhoto(ctx context.Context, id string, in PhotoPatch) (*Ph
 		}
 	}
 	return s.GetPhoto(ctx, id)
+}
+
+// MaxBatchPhotos 是单次批量操作的照片数上限，避免一个请求占住写连接太久。
+const MaxBatchPhotos = 500
+
+// BatchPhotoInput 是 POST /photos/batch 的输入。
+type BatchPhotoInput struct {
+	Action   string   `json:"action"` // move | delete
+	PhotoIDs []string `json:"photo_ids"`
+	NodeID   *string  `json:"node_id"` // action=move 时必填
+}
+
+// BatchFailure 记录单张照片的失败原因，让前端能精确告知用户哪几张没成功。
+type BatchFailure struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
+// BatchResult 是批量操作结果。逐条汇报而非整体失败：批量移动时个别照片
+// 因目标节点已有同图而冲突是常态，不该因此回滚其余成功的操作。
+type BatchResult struct {
+	Succeeded int            `json:"succeeded"`
+	Failed    []BatchFailure `json:"failed"`
+}
+
+// BatchPhotos 批量移动或删除照片。
+func (s *Service) BatchPhotos(ctx context.Context, in BatchPhotoInput) (*BatchResult, error) {
+	if len(in.PhotoIDs) == 0 {
+		return nil, Validationf("photo_ids 不能为空")
+	}
+	if len(in.PhotoIDs) > MaxBatchPhotos {
+		return nil, Validationf("单次最多处理 %d 张，收到 %d 张", MaxBatchPhotos, len(in.PhotoIDs))
+	}
+
+	var targetNode string
+	switch in.Action {
+	case "move":
+		if in.NodeID == nil || *in.NodeID == "" {
+			return nil, Validationf("action=move 时必须提供 node_id")
+		}
+		targetNode = *in.NodeID
+		if _, err := s.st.GetNode(ctx, targetNode, false); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+	case "delete":
+	default:
+		return nil, Validationf("action 只能是 move 或 delete")
+	}
+
+	now := store.Now()
+	res := &BatchResult{}
+	seen := map[string]bool{}
+	for _, id := range in.PhotoIDs {
+		if seen[id] {
+			continue // 重复 id 静默跳过，不重复计数
+		}
+		seen[id] = true
+
+		var err error
+		if in.Action == "move" {
+			err = s.st.MovePhoto(ctx, id, targetNode, now)
+		} else {
+			err = s.st.SoftDeletePhoto(ctx, id, now)
+		}
+		switch {
+		case err == nil:
+			res.Succeeded++
+		case errors.Is(err, store.ErrDuplicate):
+			res.Failed = append(res.Failed, BatchFailure{ID: id, Reason: "目标节点已有同一张照片"})
+		case errors.Is(err, store.ErrNotFound):
+			res.Failed = append(res.Failed, BatchFailure{ID: id, Reason: "照片不存在或已删除"})
+		default:
+			return nil, err // 非预期错误（如 DB 故障）直接中止
+		}
+	}
+	if res.Succeeded > 0 {
+		s.invalidateStats()
+	}
+	return res, nil
 }
 
 // DeletePhoto 软删照片。

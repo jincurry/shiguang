@@ -168,8 +168,20 @@ Windows 记事本存的 UTF-8 BOM。**限制**：文件名本身含 `=` 时无�
 日期多半不是真实拍摄日，导入后需要在后台核对。建议先看 dry-run 再决定是
 调整文件夹结构，还是导入后手工改日期。
 
-导入后想重新归类，管理后台每张照片的悬浮操作里有 `⇄`（移到其他节点），
-点开选目标节点即可；对应 API 是 `PATCH /photos/{id}` 带 `node_id`。
+### 导入后的整理
+
+管理后台支持批量整理：
+
+- **多选**：每张照片左下角的 `✓` 勾选；按住 Shift 点第二张可连选一段；
+  选中后底部出现工具条，可**批量移到其他节点**或**批量删除**（进回收站）。
+  Esc 取消选择。对应 API 是 `POST /photos/batch`，逐条汇报结果——批量移动时
+  个别照片因目标节点已有同图而冲突是常态，不该因此让整批失败。
+- **单张移动**：卡片悬浮操作里的 `⇄`（`PATCH /photos/{id}` 带 `node_id`）。
+- **节点搜索**：左栏搜索框按标题或日期实时过滤，空格分隔的多个词需全部命中。
+
+**大库表现**：后台登录只拉节点元数据（`GET /timeline?include_photos=false`），
+某个节点的照片等选中它时才按需取。实测 8 个节点 / 210 张照片：左栏数据从
+109 KB 降到 1.1 KB，登录耗时 1.0s，点开 200 张的节点 1.0s。
 
 ## curl 冒烟脚本
 
@@ -212,7 +224,13 @@ curl -s -X PUT    $BASE/api/v1/nodes/$NODE/photos/order -H "$AUTH" -H 'Content-T
 curl -s -X DELETE $BASE/api/v1/photos/$PHOTO -H "$AUTH"
 curl -s -X POST   $BASE/api/v1/photos/$PHOTO/restore -H "$AUTH"
 
-# 6. 秒传验证（再传同文件应 409 + 已存在照片）
+# 6. 批量移动 / 批量删除（逐条汇报结果，部分失败不影响其余）
+curl -s -X POST $BASE/api/v1/photos/batch -H "$AUTH" -H 'Content-Type: application/json' \
+  -d "{\"action\":\"move\",\"photo_ids\":[\"$PHOTO\"],\"node_id\":\"$OTHER_NODE\"}"
+curl -s -X POST $BASE/api/v1/photos/batch -H "$AUTH" -H 'Content-Type: application/json' \
+  -d "{\"action\":\"delete\",\"photo_ids\":[\"$PHOTO\"]}"
+
+# 7. 秒传验证（再传同文件应 409 + 已存在照片）
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $BASE/api/v1/nodes/$NODE/photos -H "$AUTH" -F file=@photo.jpg
 ```
 
@@ -256,7 +274,12 @@ processing/pending 的照片重新入队，过期上传会话由 reaper 每 5 �
 6. 变体响应头含 `immutable`；`SG_PUBLIC_READ=false` 时未带签名的变体 URL 403；
    `GET /healthz` 返回 200。
 
-## 测试
+## 测试与 CI
+
+GitHub Actions（`.github/workflows/ci.yml`）在 PR 与 main 推送时运行：
+gofmt 检查、`go vet`、`go build`、`go test -race`，外加两个针对本项目形态的
+检查——内嵌 HTML 的 JS 语法体检（`go:embed` 不校验内容，语法错误会被直接
+打进二进制），以及 sgctl 的五平台交叉编译（产物作为 artifact 保留 14 天）。
 
 ```bash
 go build ./... && go vet ./... && go test ./...

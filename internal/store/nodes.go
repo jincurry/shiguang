@@ -187,6 +187,37 @@ func (s *Store) PhotosByNodeIDs(ctx context.Context, nodeIDs []string) (map[stri
 	return out, rows.Err()
 }
 
+// PhotoCountsByNodeIDs 批量取各节点的存活照片数（不取照片本体）。
+// 后台左栏只需要计数，走这条比拉全部照片行便宜一个数量级。
+func (s *Store) PhotoCountsByNodeIDs(ctx context.Context, nodeIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(nodeIDs))
+	if len(nodeIDs) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(nodeIDs)), ",")
+	args := make([]any, len(nodeIDs))
+	for i, id := range nodeIDs {
+		args[i] = id
+	}
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT node_id, COUNT(*) FROM photos
+		 WHERE node_id IN (`+ph+`) AND deleted_at IS NULL
+		 GROUP BY node_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: photo counts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 // Stats 是 GET /stats 的原始统计。
 type Stats struct {
 	NodeCount  int

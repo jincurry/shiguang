@@ -520,3 +520,109 @@ func TestImgNotThrottledByAPILimit(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchPhotos(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, nodeA := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-01-01", "title": "A"})
+	_, nodeB := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-02-02", "title": "B"})
+	idA, _ := nodeA["id"].(string)
+	idB, _ := nodeB["id"].(string)
+
+	var base bytes.Buffer
+	jpeg.Encode(&base, image.NewRGBA(image.Rect(0, 0, 14, 14)), nil)
+	mk := func(nodeID string, seed byte) string {
+		data := append(append([]byte{}, base.Bytes()...), bytes.Repeat([]byte{seed}, int(seed)+1)...)
+		return uploadTestPhoto(t, ts, nodeID, fmt.Sprintf("p%d.jpg", seed), data)
+	}
+	ids := []string{mk(idA, 1), mk(idA, 2), mk(idA, 3)}
+
+	// 批量移动到 B
+	res, data := doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "move", "photo_ids": ids, "node_id": idB})
+	if res.StatusCode != 200 {
+		t.Fatalf("batch move: %d %v", res.StatusCode, data)
+	}
+	if int(data["succeeded"].(float64)) != 3 {
+		t.Errorf("want 3 moved, got %v", data)
+	}
+	_, nb := doJSON(t, "GET", ts.URL+"/api/v1/nodes/"+idB, testToken, nil)
+	if int(nb["photo_count"].(float64)) != 3 {
+		t.Errorf("target node count: %v", nb["photo_count"])
+	}
+
+	// 批量删除其中 2 张
+	res, data = doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "delete", "photo_ids": ids[:2]})
+	if res.StatusCode != 200 || int(data["succeeded"].(float64)) != 2 {
+		t.Fatalf("batch delete: %d %v", res.StatusCode, data)
+	}
+	_, nb = doJSON(t, "GET", ts.URL+"/api/v1/nodes/"+idB, testToken, nil)
+	if int(nb["photo_count"].(float64)) != 1 {
+		t.Errorf("after delete count: %v", nb["photo_count"])
+	}
+
+	// 部分失败要逐条汇报，不能整批失败
+	dup := mk(idA, 9)
+	same := mk(idB, 9) // 与 dup 内容相同，已在 B
+	_ = same
+	res, data = doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "move", "photo_ids": []string{dup, "01NOPE"}, "node_id": idB})
+	if res.StatusCode != 200 {
+		t.Fatalf("partial failure should still be 200: %d %v", res.StatusCode, data)
+	}
+	failed, _ := data["failed"].([]any)
+	if len(failed) != 2 {
+		t.Errorf("expected 2 failures (duplicate + missing), got %v", data)
+	}
+
+	// 参数校验
+	res, _ = doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "move", "photo_ids": ids})
+	if res.StatusCode != 422 {
+		t.Errorf("move without node_id should be 422, got %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "nonsense", "photo_ids": ids})
+	if res.StatusCode != 422 {
+		t.Errorf("bad action should be 422, got %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, "POST", ts.URL+"/api/v1/photos/batch", testToken,
+		map[string]any{"action": "delete", "photo_ids": []string{}})
+	if res.StatusCode != 422 {
+		t.Errorf("empty ids should be 422, got %d", res.StatusCode)
+	}
+}
+
+// TestTimelineWithoutPhotos include_photos=false 只回节点元数据与计数，
+// 后台左栏靠它避免登录时把整库照片拉下来。
+func TestTimelineWithoutPhotos(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-03-03", "title": "N"})
+	nodeID, _ := node["id"].(string)
+	var jb bytes.Buffer
+	jpeg.Encode(&jb, image.NewRGBA(image.Rect(0, 0, 10, 10)), nil)
+	uploadTestPhoto(t, ts, nodeID, "a.jpg", jb.Bytes())
+
+	_, lite := doJSON(t, "GET", ts.URL+"/api/v1/timeline?include_photos=false", testToken, nil)
+	items, _ := lite["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items: %v", lite)
+	}
+	it := items[0].(map[string]any)
+	if int(it["photo_count"].(float64)) != 1 {
+		t.Errorf("photo_count should still be accurate: %v", it["photo_count"])
+	}
+	if photos, _ := it["photos"].([]any); len(photos) != 0 {
+		t.Errorf("photos should be empty, got %v", photos)
+	}
+
+	// 默认（不带参数）仍返回照片，前台时间轴依赖它
+	_, full := doJSON(t, "GET", ts.URL+"/api/v1/timeline", testToken, nil)
+	fit := full["items"].([]any)[0].(map[string]any)
+	if photos, _ := fit["photos"].([]any); len(photos) != 1 {
+		t.Errorf("default must include photos, got %v", photos)
+	}
+}

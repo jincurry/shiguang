@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 				g.Delete("/photos/{id}", s.handleDeletePhoto)
 				g.Post("/photos/{id}/restore", s.handleRestorePhoto)
 				g.Post("/photos/{id}/reprocess", s.handleReprocess)
+				g.Post("/photos/batch", s.handleBatchPhotos)
 				g.Get("/trash", s.handleTrash)
 				// 上传端点：单独限流 10 次/分钟
 				g.Group(func(u chi.Router) {
@@ -154,7 +155,9 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	out, err := s.svc.Timeline(r.Context(), r.URL.Query().Get("cursor"), limit)
+	// include_photos=false：只要节点元数据（后台左栏用）
+	withPhotos := r.URL.Query().Get("include_photos") != "false"
+	out, err := s.svc.Timeline(r.Context(), r.URL.Query().Get("cursor"), limit, withPhotos)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -303,6 +306,19 @@ func (s *Server) handleReprocess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, out)
+}
+
+func (s *Server) handleBatchPhotos(w http.ResponseWriter, r *http.Request) {
+	var in service.BatchPhotoInput
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	out, err := s.svc.BatchPhotos(r.Context(), in)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleTrash(w http.ResponseWriter, r *http.Request) {
