@@ -439,3 +439,30 @@ func TestPagesServed(t *testing.T) {
 		}
 	}
 }
+
+// TestLongFilenameCaptionClamped 回归：文件名超过 200 字时图注被截断而非
+// 撞 DB CHECK 约束返回 500——照片是不可再生资产，不能因文件名长就拒收。
+func TestLongFilenameCaptionClamped(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-01-01", "title": "N"})
+	nodeID, _ := node["id"].(string)
+
+	var jbuf bytes.Buffer
+	jpeg.Encode(&jbuf, image.NewRGBA(image.Rect(0, 0, 12, 12)), nil)
+	longName := strings.Repeat("a", 210) + ".jpg"
+
+	photoID := uploadTestPhoto(t, ts, nodeID, longName, jbuf.Bytes())
+	_, p := doJSON(t, "GET", ts.URL+"/api/v1/photos/"+photoID, testToken, nil)
+	cap, _ := p["caption"].(string)
+	if n := len([]rune(cap)); n != 200 {
+		t.Errorf("caption should be clamped to 200 runes, got %d", n)
+	}
+
+	// 显式改注超长仍应 422（用户明确意图，不该悄悄截断）
+	res, data := doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+photoID, testToken,
+		map[string]string{"caption": strings.Repeat("b", 201)})
+	if res.StatusCode != 422 || data["code"] != "VALIDATION_FAILED" {
+		t.Errorf("explicit over-long caption: %d %v", res.StatusCode, data)
+	}
+}

@@ -188,7 +188,8 @@ func uploadGroup(ctx context.Context, c *Client, opt Options, nodeID string, g *
 
 // uploadOne 上传单张：local 走 multipart，s3 走 presign → PUT → confirm。
 func uploadOne(ctx context.Context, c *Client, opt Options, nodeID string, p *Photo) error {
-	caption := strings.TrimSuffix(p.Name, filepath.Ext(p.Name))
+	// 图注取文件名（去扩展名），截断到服务端 200 字上限
+	caption := clampRunes(strings.TrimSuffix(p.Name, filepath.Ext(p.Name)), 200)
 	if opt.UploadMode == "s3" {
 		var uploadURL, photoID string
 		if err := withRetry(ctx, 5, func() error {
@@ -219,4 +220,13 @@ func uploadOne(ctx context.Context, c *Client, opt Options, nodeID string, p *Ph
 func isDuplicate(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.IsDuplicate()
+}
+
+// clampRunes 按字符数截断（不切坏多字节字符）。
+func clampRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		r = r[:n]
+	}
+	return string(r)
 }
