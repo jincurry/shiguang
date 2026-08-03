@@ -19,6 +19,9 @@ const TimeFormat = "2006-01-02T15:04:05.000Z"
 // ErrNotFound 表示行不存在（或已软删且调用方要求存活行）。
 var ErrNotFound = errors.New("store: not found")
 
+// ErrDuplicate 表示操作会违反同节点 sha256 唯一约束（同一张图重复入节点）。
+var ErrDuplicate = errors.New("store: duplicate photo in node")
+
 // Now 返回当前 UTC 时间的存储格式字符串。
 func Now() string { return time.Now().UTC().Format(TimeFormat) }
 

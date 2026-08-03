@@ -23,14 +23,23 @@ func (s *Service) maxUploadBytes() int64 { return s.cfg.UploadLimitMB << 20 }
 // maxPixels 返回像素上限。
 func (s *Service) maxPixels() int64 { return s.cfg.PixelLimitMP * 1_000_000 }
 
-// captionFromFilename 从文件名派生默认图注（去扩展名、截断到 200 字）。
-func captionFromFilename(name string) string {
-	c := strings.TrimSuffix(path.Base(name), path.Ext(name))
+// maxCaptionRunes 与 photos.caption 的 CHECK 约束一致。
+const maxCaptionRunes = 200
+
+// clampCaption 把图注截断到 200 字。上传路径用截断而非报错：照片是不可再生
+// 资产，不能因为文件名过长就拒收整张原图（DB 的 CHECK 会直接抛 500）。
+// 显式改注走 PatchPhoto，那里超长仍返回 422。
+func clampCaption(c string) string {
 	r := []rune(c)
-	if len(r) > 200 {
-		r = r[:200]
+	if len(r) > maxCaptionRunes {
+		r = r[:maxCaptionRunes]
 	}
 	return string(r)
+}
+
+// captionFromFilename 从文件名派生默认图注（去扩展名、截断到 200 字）。
+func captionFromFilename(name string) string {
+	return clampCaption(strings.TrimSuffix(path.Base(name), path.Ext(name)))
 }
 
 // UploadLocal 处理 local 模式 multipart 上传：
@@ -87,6 +96,8 @@ func (s *Service) UploadLocal(ctx context.Context, nodeID, filename, caption str
 
 	if caption == "" {
 		caption = captionFromFilename(filename)
+	} else {
+		caption = clampCaption(caption)
 	}
 	ord, err := s.st.NextOrd(ctx, nodeID)
 	if err != nil {

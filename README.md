@@ -40,6 +40,8 @@ docker compose up -d
 | `SG_LIMIT_PIXELS_MP` | `60` | 像素上限（pixel bomb 防护） |
 | `SG_TRASH_TTL_DAYS` | `7` | 回收站保留天数 |
 | `SG_WORKERS` | `0` | 处理 worker 数，0=NumCPU |
+| `SG_LIMIT_GLOBAL_RPS` | `50` | 全局限流（次/秒） |
+| `SG_LIMIT_UPLOAD_RPM` | `120` | 上传端点限流（次/分钟）。批量导入几千张时可调到 `600` |
 
 启动即校验：缺必填项 fail-fast 并打印配置示例。
 
@@ -68,6 +70,106 @@ docker compose exec minio mc mb local/shiguang
 ```
 
 s3 模式上传走 presign 直传：浏览器 PUT 到对象存储，不过应用带宽。
+
+## 批量导入照片（sgctl）
+
+后台的显影盘适合日常加几十张（支持整个文件夹拖入，带并发队列和总进度条）。
+成百上千张的老照片入库用 `sgctl`——单文件纯 Go 二进制，**放在任何能访问服务的
+机器上都能跑**，不需要和服务同机。
+
+```bash
+# 构建（或用 make dist 交叉编译出各平台版本到 dist/）
+make sgctl                    # → bin/sgctl
+make dist                     # → dist/sgctl-{darwin,linux,windows}-{amd64,arm64}
+
+# 先看一眼会怎么分组，不上传任何东西
+sgctl import ~/Photos --dry-run
+
+# 真正导入
+export SG_ADMIN_TOKEN=your-token
+sgctl import ~/Photos --server https://photos.example.com
+```
+
+输出示例：
+
+```
+已连接 https://photos.example.com（存储模式：local）
+上传中 31/31  已传 31  已存在 0  失败 0
+
+完成，用时 12.4s
+  节点：新建 5 个，复用 0 个
+  照片：上传 31 张，已存在跳过 0 张，失败 0 张
+```
+
+**分组方式**（`--group`，默认 `auto`）：
+
+| 模式 | 行为 |
+|------|------|
+| `auto` | 子目录里的照片按目录名归组，直接躺在根目录的按 EXIF 拍摄日期归组。最贴合"部分整理过"的照片库 |
+| `date` | 一律按 EXIF 拍摄日期（无 EXIF 时用文件修改时间） |
+| `folder` | 一律按第一层目录名，根目录散图归入「未分类」 |
+| `single` | 全部放进一个节点（配 `--title` 指定标题），之后在后台慢慢分 |
+
+节点日期取组内最早的拍摄时间，组内照片按拍摄时间升序排列。
+
+**其他要点**：
+
+- **可中断、可重跑**。照片按 sha256 内容寻址去重，中断后重跑同一条命令会自动
+  跳过已导入的（计入"已存在"而非失败），只补没传完的部分。Ctrl-C 安全退出。
+- **同名节点会复用**，不会因为重跑造出一堆重复节点（按 `日期+标题` 匹配）。
+- **按魔数而非扩展名判定类型**：改名的 `.txt` 在扫描阶段就被剔除，不浪费上传；
+  目录里混着的文档、视频静默跳过；`.thumbnails`、`@eaDir`、`$RECYCLE.BIN` 等
+  系统目录整个跳过。
+- **429 自动退避重试**（尊重 `Retry-After`），所以并发调高也不会传失败。
+  导入几千张时建议服务端把 `SG_LIMIT_UPLOAD_RPM` 调到 `600`，客户端
+  `--concurrency 8`。
+- s3 模式下自动走 presign 直传，照片不经过应用服务器。
+
+### 指定日期与文案（清单文件，可选）
+
+自动推导出的节点日期、标题和图注不一定合心意。在照片目录里放一个
+`shiguang.txt` 就能覆盖它们——**没有这个文件时，一切按自动推导走，行为与
+不用清单时完全一致**。
+
+```bash
+sgctl import ~/Photos --emit-manifest   # 按当前推导结果生成模板（不覆盖已有）
+# 用文本编辑器改完，再正常导入
+sgctl import ~/Photos --server https://photos.example.com
+```
+
+清单格式刻意做得极简，值写到行尾即可，不需要引号和转义：
+
+```
+# 以 # 开头的行是注释；删掉某一行 = 该项回到自动推导
+date = 2019-10-06
+title = 小妹的婚礼
+description = 全家去了三亚，海边办的仪式
+
+# 每张照片的图注：文件名 = 图注
+DSC1000.jpg = 接亲那天早上
+DSC1001.jpg = 海边仪式
+```
+
+生效规则（只有两条）：
+
+- **图注**按文件名匹配清单所在目录内的照片，任何 `--group` 模式下都生效；
+  没写的照片仍回落到文件名。文件名大小写不敏感。
+- **`date` / `title` / `description`** 只在该目录恰好对应一个节点时生效
+  （`auto`/`folder` 模式的第一层子目录、`single` 模式的根目录）。否则会明确
+  提示"未生效"，而不是悄悄套到某个节点上。
+
+其他细节：日期非 `YYYY-MM-DD`、标题超 120 字、图注超 200 字都会给出警告并
+忽略或截断；清单里写了目录下不存在的文件名会被报出来（多半是拼错）；支持
+Windows 记事本存的 UTF-8 BOM。**限制**：文件名本身含 `=` 时无法在清单中表示
+（按首个 `=` 切分键值），这种文件请先改名——工具会明确报出来而不是静默存错。
+
+**日期可信度提示**：`--dry-run` 会用 `⚠` 标出「日期来自文件修改时间而非 EXIF
+拍摄时间」的节点，用 `✎` 标出由清单指定日期的节点。扫描件、被聊天软件转发过的照片通常没有 EXIF，这类节点的
+日期多半不是真实拍摄日，导入后需要在后台核对。建议先看 dry-run 再决定是
+调整文件夹结构，还是导入后手工改日期。
+
+导入后想重新归类，管理后台每张照片的悬浮操作里有 `⇄`（移到其他节点），
+点开选目标节点即可；对应 API 是 `PATCH /photos/{id}` 带 `node_id`。
 
 ## curl 冒烟脚本
 
@@ -103,8 +205,9 @@ curl -s "$BASE/api/v1/timeline?limit=10" -H "$AUTH" | jq .
 curl -s  $BASE/api/v1/stats -H "$AUTH" | jq .
 curl -s  $BASE/api/v1/trash -H "$AUTH" | jq .
 
-# 5. 改注 / 排序 / 软删 / 恢复
+# 5. 改注 / 移动到其他节点 / 排序 / 软删 / 恢复
 curl -s -X PATCH  $BASE/api/v1/photos/$PHOTO -H "$AUTH" -H 'Content-Type: application/json' -d '{"caption":"新图注"}'
+curl -s -X PATCH  $BASE/api/v1/photos/$PHOTO -H "$AUTH" -H 'Content-Type: application/json' -d "{\"node_id\":\"$OTHER_NODE\"}"
 curl -s -X PUT    $BASE/api/v1/nodes/$NODE/photos/order -H "$AUTH" -H 'Content-Type: application/json' -d "{\"photo_ids\":[\"$PHOTO\"]}"
 curl -s -X DELETE $BASE/api/v1/photos/$PHOTO -H "$AUTH"
 curl -s -X POST   $BASE/api/v1/photos/$PHOTO/restore -H "$AUTH"
@@ -165,8 +268,10 @@ SG_TEST_S3_ENDPOINT=http://localhost:9000 SG_TEST_S3_BUCKET=shiguang-test go tes
 
 覆盖：EXIF 8 方向矫正、灰度 png、截断文件、60MP 伪造头、blob 契约
 （fake/local/s3 同套件 + 防穿越）、上传→ready 全流程、409 秒传、跨节点共享
-blob 防误删、reaper、启动恢复、游标分页不重不漏、trash 恢复、鉴权、429 限流、
-413/415、响应结构。
+blob 防误删、跨节点移动照片（含目标重复 409）、reaper、启动恢复、游标分页
+不重不漏、trash 恢复、鉴权、429 限流与批量首波不被限流、413/415、超长文件名
+图注截断、响应结构、导入扫描的魔数过滤与四种分组模式、清单解析与套用
+（含无清单时行为不变、模板不覆盖用户改动、拼错文件名告警）。
 
 ## 实现取舍清单
 
@@ -202,15 +307,34 @@ blob 防误删、reaper、启动恢复、游标分页不重不漏、trash 恢复
     全部元数据，对外只出变体。
 13. **前台私有读**：`SG_PUBLIC_READ=false` 时前台时间轴需要 token，页面显示
     「相册未公开，需要访问授权」——单管理员场景下私有浏览走管理台。
-14. **限流实现**：内存令牌桶（全局 50 rps burst 100；上传 10 次/分钟 burst 10），
-    单机部署无需分布式限流。
+14. **限流实现**：内存令牌桶（全局 50 rps；上传 120 次/分钟），两者均可经
+    `SG_LIMIT_GLOBAL_RPS` / `SG_LIMIT_UPLOAD_RPM` 调整，单机部署无需分布式限流。
+    上传默认值从最初的 10 次/分钟提高到 120——上传 handler 只做落盘 + 入队，
+    真正的 CPU 消耗由 worker 池自行限流，过低的上传限流只会卡死批量导入。
+15. **批量上传的并发**：后台显影盘用并发上限 3 的队列（而非一次全部发出），
+    429 一律指数退避重试而不是判失败；CLI 默认并发 4、可用 `--concurrency` 调。
+16. **显影轮询按节点而非按照片**：`GET /nodes/{id}` 一次带回该节点全部照片
+    状态，所以一个节点里传 200 张也只是每 3 秒 1 个请求。
+17. **导入的类型判定**：客户端按魔数嗅探而非扩展名，改名的 `.txt` 在扫描阶段
+    就剔除，不浪费一次上传往返；EXIF 只读文件头 64KB（EXIF 段在开头），
+    不把整张原图读进内存。
+18. **导入的节点复用**：按 `日期+标题` 匹配已有节点，避免重跑造出重复节点；
+    照片去重靠内容寻址（同节点同 sha 返回 409），两者共同保证重跑幂等。
+19. **清单文件格式**：自造的行式格式而非 TOML/YAML——避免为一个可选功能引入
+    解析依赖，且 `文件名 = 中文图注` 无需引号转义，比 JSON 好手写得多。
+    代价是文件名含 `=` 无法表示，故做成显式报错而非静默切错。
+20. **清单的作用域规则**：节点级字段只在目录唯一对应一个节点时生效，否则宁可
+    不生效并告警——多份清单争抢同一节点会产生取决于遍历顺序的结果，
+    对不可再生资产而言，可预测比"尽量生效"更重要。
 
 ## 项目结构
 
 ```
 shiguang/
 ├── cmd/server/           # 装配、配置校验、优雅退出（drain worker → close db）
+├── cmd/sgctl/            # 命令行工具：批量导入
 ├── internal/
+│   ├── importer/         # 扫描 / EXIF 分组 / API 客户端 / 并发导入
 │   ├── httpapi/          # 路由 + 中间件（auth/ratelimit/reqid/recover/log）+ /img
 │   ├── service/          # 业务编排；DB 与 blob 一致性责任集中在此
 │   ├── store/            # SQLite 访问（读写双池，写连接上限 1）

@@ -274,14 +274,36 @@ func (s *Service) RestoreNode(ctx context.Context, id string) (*NodeDTO, error) 
 type PhotoPatch struct {
 	Caption *string `json:"caption"`
 	Ord     *int64  `json:"ord"`
+	// NodeID 非空时把照片移动到该节点末尾（批量导入后重新归类用）。
+	NodeID *string `json:"node_id"`
 }
 
-// PatchPhoto 修改图注/序号。
+// PatchPhoto 修改图注/序号，或把照片移动到另一个节点。
 func (s *Service) PatchPhoto(ctx context.Context, id string, in PhotoPatch) (*PhotoDTO, error) {
-	if in.Caption == nil && in.Ord == nil {
-		return nil, Validationf("caption 与 ord 至少提供一个")
+	if in.Caption == nil && in.Ord == nil && in.NodeID == nil {
+		return nil, Validationf("caption、ord 与 node_id 至少提供一个")
 	}
 	now := store.Now()
+	// 先移动再改序号：移动会把 ord 重置到目标节点末尾，顺序相反会被覆盖
+	if in.NodeID != nil {
+		if *in.NodeID == "" {
+			return nil, Validationf("node_id 不能为空字符串")
+		}
+		err := s.st.MovePhoto(ctx, id, *in.NodeID, now)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			return nil, ErrNotFound
+		case errors.Is(err, store.ErrDuplicate):
+			existing, ferr := s.st.GetPhoto(ctx, id, false)
+			if ferr != nil {
+				return nil, ferr
+			}
+			return nil, &DuplicateError{Existing: s.photoDTO(ctx, existing)}
+		case err != nil:
+			return nil, err
+		}
+		s.invalidateStats()
+	}
 	if in.Caption != nil {
 		c := strings.TrimSpace(*in.Caption)
 		if len([]rune(c)) > 200 {

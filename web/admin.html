@@ -314,6 +314,27 @@
   .modal h4{font-family:var(--serif);font-size:17px;letter-spacing:.04em;}
   .modal p{margin-top:8px;color:var(--muted);font-size:13.5px;}
   .modal .row{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;}
+
+  /* 节点选择器（移动照片到其他节点） */
+  .picklist{
+    margin-top:16px;max-height:min(46vh,340px);overflow-y:auto;
+    display:flex;flex-direction:column;gap:4px;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+  }
+  .picklist::-webkit-scrollbar{width:6px;}
+  .picklist::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .pick{
+    text-align:left;width:100%;padding:9px 12px;border-radius:8px;
+    border:1px solid transparent;display:flex;align-items:baseline;gap:10px;
+    transition:background .2s,border-color .2s;
+  }
+  .pick:hover{background:var(--bg-soft);border-color:var(--line);}
+  .pick .d{font-family:var(--mono);font-size:10.5px;color:var(--amber);flex:none;}
+  .pick .t{font-family:var(--serif);font-weight:600;font-size:14.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pick .c{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto;flex:none;}
+  .pick-empty{color:var(--faint);font-family:var(--mono);font-size:12px;
+    letter-spacing:.1em;text-align:center;padding:28px 0;}
   #toasts{position:fixed;left:0;right:0;bottom:26px;z-index:95;
     display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;}
   .toast{
@@ -324,6 +345,27 @@
   }
   .toast.ok{border-color:rgba(127,166,90,.5);} .toast.err{border-color:rgba(212,85,59,.6);}
   @keyframes tIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;}}
+
+  /* 批量上传总进度（显影盘一次吞下整个文件夹时） */
+  #batchbar{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:96;
+    display:flex;flex-direction:column;gap:8px;min-width:min(300px,86vw);
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;
+    background:rgba(29,25,21,.96);border:1px solid var(--line);color:var(--ivory);
+    padding:12px 18px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+    animation:tIn .3s ease;
+  }
+  #batchbar[hidden]{display:none;}
+  #batchbar .row{display:flex;align-items:baseline;gap:10px;}
+  #batchbar .row span{flex:1;}
+  #batchbar .row em{font-style:normal;color:var(--faint);}
+  #batchbar .bar{display:block;height:3px;background:rgba(255,255,255,.12);
+    border-radius:2px;overflow:hidden;}
+  #batchbar .bar b{display:block;height:100%;width:0;background:var(--amber);
+    transition:width .3s ease;}
+  body.light #batchbar{background:rgba(255,253,246,.97);
+    box-shadow:0 8px 24px rgba(90,75,55,.25);}
+  body.light #batchbar .bar{background:rgba(90,75,55,.14);}
 
   @media (max-width:760px){
     .layout{grid-template-columns:1fr;}
@@ -411,7 +453,23 @@
     </div>
   </div>
 </div>
+
+<!-- 节点选择弹层（移动照片） -->
+<div class="modal" id="pickModal">
+  <div class="box">
+    <h4>移到哪个节点？</h4>
+    <p id="pickBody"></p>
+    <div class="picklist" id="pickList"></div>
+    <div class="row">
+      <button class="btn ghost" id="pickCancel">取消</button>
+    </div>
+  </div>
+</div>
 <div id="toasts"></div>
+<div id="batchbar" hidden>
+  <div class="row"><span id="batchText"></span><em id="batchSub"></em></div>
+  <i class="bar"><b id="batchFill"></b></i>
+</div>
 
 <script>
 /* ================= API 层 ================= */
@@ -433,7 +491,7 @@ async function api(path, opt = {}){
   }
   if(res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if(!res.ok) throw {status: res.status, data};
+  if(!res.ok) throw {status: res.status, data, retryAfter: res.headers.get('Retry-After')};
   return data;
 }
 
@@ -448,7 +506,8 @@ function xhrUpload(method, url, body, onProgress, headers = {}){
       let data = {};
       try{ data = JSON.parse(xhr.responseText || '{}'); }catch(_){}
       if(xhr.status >= 200 && xhr.status < 300) res(data);
-      else rej({status: xhr.status, data});
+      else rej({status: xhr.status, data,
+                retryAfter: xhr.getResponseHeader('Retry-After')});
     };
     xhr.onerror = () => rej({status: 0, data: {message: '网络错误'}});
     xhr.send(body);
@@ -511,6 +570,41 @@ function confirmBox(title, body){
     const done = v => { $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null; res(v); };
     const ok = $('#mOk'), cc = $('#mCancel');
     ok.onclick = () => done(true); cc.onclick = () => done(false);
+  });
+}
+
+/* 节点选择器：列出除 excludeId 外的全部节点，返回选中的 id 或 null */
+function pickNode(excludeId, hint){
+  return new Promise(res => {
+    const list = $('#pickList');
+    $('#pickBody').textContent = hint || '';
+    const items = [...state.nodes]
+      .filter(n => n.id !== excludeId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if(!items.length){
+      list.innerHTML = '<div class="pick-empty">没有其他节点可移动</div>';
+    }else{
+      list.innerHTML = items.map(n => `
+        <button class="pick" data-id="${esc(n.id)}">
+          <span class="d">${esc(n.date)}</span>
+          <span class="t">${esc(n.title)}</span>
+          <span class="c">×${n.photos.length}</span>
+        </button>`).join('');
+    }
+    $('#pickModal').classList.add('on');
+    const done = v => {
+      $('#pickModal').classList.remove('on');
+      list.onclick = null; $('#pickCancel').onclick = null;
+      document.removeEventListener('keydown', onKey);
+      res(v);
+    };
+    const onKey = e => { if(e.key === 'Escape') done(null); };
+    document.addEventListener('keydown', onKey);
+    list.onclick = e => {
+      const b = e.target.closest('.pick');
+      if(b) done(b.dataset.id);
+    };
+    $('#pickCancel').onclick = () => done(null);
   });
 }
 const node = id => state.nodes.find(n => n.id === id);
@@ -632,14 +726,18 @@ function renderDetail(){
     <div class="sect">
       <h3>显影盘 · 上传</h3>
       <label class="tray" id="tray">
-        <div class="big">把照片拖进显影盘</div>
+        <div class="big">把照片或整个文件夹拖进显影盘</div>
         <div class="small">或 <b>点击选择</b> · jpg / png / webp · 单张 ≤ 30MB</div>
         <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple>
       </label>
+      <p class="mono" style="margin-top:10px;font-size:11px;color:var(--faint);letter-spacing:.06em">
+        整批老照片建议用 <b style="color:var(--amber);font-weight:400">sgctl import</b>
+        命令行工具，可自动按拍摄日期分节点、断点续传
+      </p>
     </div>
 
     <div class="sect">
-      <h3>晾片整理 · 拖木夹排序 / 点 ✎ 改注 / ★ 设封面</h3>
+      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点</h3>
       <div class="grid" id="grid"></div>
     </div>`;
   renderGrid(n);
@@ -677,20 +775,51 @@ function renderDetail(){
   const tray = $('#tray');
   ;['dragenter','dragover'].forEach(ev => tray.addEventListener(ev, e => { e.preventDefault(); tray.classList.add('hover'); }));
   ;['dragleave','drop'].forEach(ev => tray.addEventListener(ev, e => { e.preventDefault(); tray.classList.remove('hover'); }));
-  tray.addEventListener('drop', e => ingest(n, [...e.dataTransfer.files]));
+  tray.addEventListener('drop', async e => {
+    const files = await filesFromDrop(e.dataTransfer);
+    ingest(n, files);
+  });
   $('#file').addEventListener('change', e => { ingest(n, [...e.target.files]); e.target.value = ''; });
+}
+
+/* 拖入的若是文件夹，递归展开成文件列表（DataTransferItem.webkitGetAsEntry）；
+   浏览器不支持时退回 dataTransfer.files（只含顶层文件）。 */
+async function filesFromDrop(dt){
+  const entries = [...(dt.items || [])]
+    .map(it => it.webkitGetAsEntry && it.webkitGetAsEntry())
+    .filter(Boolean);
+  if(!entries.length) return [...dt.files];
+
+  const out = [];
+  const walk = entry => new Promise(res => {
+    if(entry.isFile){
+      entry.file(f => { out.push(f); res(); }, res);
+      return;
+    }
+    if(!entry.isDirectory){ res(); return; }
+    const reader = entry.createReader();
+    const readBatch = () => reader.readEntries(async batch => {
+      if(!batch.length){ res(); return; }        /* 目录读完 */
+      await Promise.all(batch.map(walk));
+      readBatch();                               /* readEntries 每次最多 100 条 */
+    }, res);
+    readBatch();
+  });
+  await Promise.all(entries.map(walk));
+  return out;
 }
 
 function renderGrid(n){
   const g = $('#grid');
   g.innerHTML = n.photos.map((p, i) => `
-    <figure class="card ${i === 0 ? 'cover' : ''} ${p.st === 'uploading' ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
+    <figure class="card ${i === 0 ? 'cover' : ''} ${(p.st === 'uploading' || p.st === 'queued') ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
             data-id="${esc(p.id)}">
       <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
       <span class="star">★ 封面</span>
       <div class="ops">
         <button data-op="cap" title="改图注">✎</button>
         <button data-op="cover" title="设为封面">★</button>
+        <button data-op="move" title="移到其他节点">⇄</button>
         <button data-op="del" title="删除">✕</button>
       </div>
       <div class="ph">
@@ -704,28 +833,116 @@ function renderGrid(n){
   bindCards(n);
 }
 
-/* ================= 上传（local: multipart / s3: presign→PUT→confirm） ================= */
-function ingest(n, files){
-  const ok = files.filter(f => /image\/(jpeg|png|webp)/.test(f.type));
-  if(files.length && !ok.length){ toast('仅支持 jpg / png / webp', 'err'); return; }
-  ok.forEach(f => {
-    if(f.size > 30 * 1024 * 1024){ toast(`${f.name} 超过 30MB，已拒绝`, 'err'); return; }
-    uploadOne(n, f);
+/* ================= 上传（local: multipart / s3: presign→PUT→confirm） =================
+   批量上传走并发队列：一次拖进几十上百张时，既不打爆服务端限流，
+   也不让浏览器同时挂起上百个 XHR。429 一律指数退避重试而非判失败。 */
+const UPLOAD_CONCURRENCY = 3;
+const MAX_MB = 30;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const tmpId = () => 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+
+const batch = {total: 0, done: 0, ok: 0, dup: 0, failed: 0, active: 0, queue: []};
+
+/* renderGrid 是整表重建，批量时用 rAF 合并，避免每张完成都重排一次 DOM */
+let gridPending = null;
+function scheduleGrid(n){
+  if(gridPending) return;
+  gridPending = requestAnimationFrame(() => {
+    gridPending = null;
+    if(state.sel === n.id) renderGrid(n);
+    renderList(); renderStats();
   });
 }
 
-async function uploadOne(n, f, retryP){
-  let p = retryP;
-  if(!p){
-    p = {id: 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-         cap: f.name.replace(/\.[^.]+$/, ''),
-         bg: `url('${URL.createObjectURL(f)}')`,
-         st: 'uploading', prog: 0, _file: f};
-    n.photos.push(p);
-  }else{
-    p.st = 'uploading'; p.prog = 0; p.fail = null;
+/* 429 指数退避：优先尊重 Retry-After，最多重试 5 次 */
+async function withBackoff(fn, attempts = 5){
+  for(let i = 0; ; i++){
+    try{ return await fn(); }
+    catch(err){
+      if(err.status !== 429 || i >= attempts - 1) throw err;
+      const ra = Number(err.retryAfter) || 0;
+      await sleep(ra > 0 ? ra * 1000 + Math.random() * 500
+                         : Math.min(30000, 1000 * 2 ** i) + Math.random() * 500);
+    }
   }
+}
+
+function ingest(n, files){
+  const imgs = [];
+  let wrongType = 0, tooBig = 0;
+  for(const f of files){
+    if(!/image\/(jpeg|png|webp)/.test(f.type)){ wrongType++; continue; }
+    if(f.size > MAX_MB * 1024 * 1024){ tooBig++; continue; }
+    imgs.push(f);
+  }
+  if(wrongType) toast(`${wrongType} 个文件不是 jpg / png / webp，已跳过`, 'err');
+  if(tooBig) toast(`${tooBig} 个文件超过 ${MAX_MB}MB，已跳过`, 'err');
+  if(!imgs.length) return;
+
+  /* 先一次性建好占位卡片并渲染一次，再逐个排队上传 */
+  const items = imgs.map(f => {
+    const p = {id: tmpId(), cap: f.name.replace(/\.[^.]+$/, ''),
+               bg: `url('${URL.createObjectURL(f)}')`,
+               st: 'queued', prog: 0, _file: f};
+    n.photos.push(p);
+    return {n, f, p};
+  });
   renderGrid(n); renderList(); renderStats();
+  enqueue(items);
+}
+
+function enqueue(items){
+  batch.total += items.length;
+  batch.queue.push(...items);
+  showBatch();
+  while(batch.active < UPLOAD_CONCURRENCY && batch.queue.length) pump();
+}
+
+function pump(){
+  const item = batch.queue.shift();
+  if(!item) return;
+  batch.active++;
+  uploadOne(item.n, item.f, item.p).then(r => {
+    if(r === 'dup') batch.dup++;
+    else if(r === 'failed') batch.failed++;
+    else batch.ok++;
+  }).finally(() => {
+    batch.active--;
+    batch.done++;
+    showBatch();
+    if(batch.queue.length) pump();
+    else if(batch.active === 0) endBatch();
+  });
+}
+
+function showBatch(){
+  if(batch.total <= 1) return;           /* 单张走卡片自身进度条即可 */
+  const bar = $('#batchbar');
+  bar.hidden = false;
+  $('#batchText').textContent = `上传中 ${batch.done} / ${batch.total}`;
+  const parts = [];
+  if(batch.dup) parts.push(`${batch.dup} 张已存在`);
+  if(batch.failed) parts.push(`${batch.failed} 张失败`);
+  $('#batchSub').textContent = parts.join(' · ');
+  $('#batchFill').style.width = (batch.done / batch.total * 100).toFixed(1) + '%';
+}
+
+function endBatch(){
+  const {total, ok, dup, failed} = batch;
+  if(total > 1){
+    const parts = [`${ok} 张已进显影盘`];
+    if(dup) parts.push(`${dup} 张已存在`);
+    if(failed) parts.push(`${failed} 张失败`);
+    toast(parts.join(' · '), failed ? 'err' : 'ok');
+  }
+  setTimeout(() => { $('#batchbar').hidden = true; }, 600);
+  batch.total = batch.done = batch.ok = batch.dup = batch.failed = 0;
+}
+
+/* uploadOne 只负责传一张，成功/秒传/失败都以返回值告知队列，不再抛出 */
+async function uploadOne(n, f, p){
+  p.st = 'uploading'; p.prog = 0; p.fail = null;
+  scheduleGrid(n);               /* 单张重试时让卡片立刻回到"上传中" */
   const onp = pct => {
     p.prog = pct;
     const el = document.querySelector(`.card[data-id="${cssq(p.id)}"] .prog i`);
@@ -734,62 +951,78 @@ async function uploadOne(n, f, retryP){
   try{
     let ph;
     if(state.mode === 's3'){
-      const pre = await api('/uploads/presign', {method: 'POST',
-        body: {node_id: n.id, filename: f.name, size: f.size, content_type: f.type}});
+      const pre = await withBackoff(() => api('/uploads/presign', {method: 'POST',
+        body: {node_id: n.id, filename: f.name, size: f.size, content_type: f.type}}));
       await xhrUpload('PUT', pre.upload_url, f, onp, {'Content-Type': f.type});
-      ph = await api(`/photos/${pre.photo_id}/confirm`, {method: 'POST'});
+      ph = await withBackoff(() => api(`/photos/${pre.photo_id}/confirm`, {method: 'POST'}));
     }else{
-      const fd = new FormData();
-      fd.append('file', f);
-      ph = await xhrUpload('POST', `${API}/nodes/${n.id}/photos`, fd, onp,
-        {'Authorization': 'Bearer ' + token()});
+      ph = await withBackoff(() => {
+        const fd = new FormData();
+        fd.append('file', f);
+        return xhrUpload('POST', `${API}/nodes/${n.id}/photos`, fd, onp,
+          {'Authorization': 'Bearer ' + token()});
+      });
     }
     const file = p._file;
     Object.assign(p, mapPhoto(ph));
     p._file = file;
-    renderGrid(n);
+    scheduleGrid(n);
     watch(p, n);                 /* 202 后进入"显影中"，轮询到 ready/failed */
+    return 'ok';
   }catch(err){
     if(err.status === 409 && err.data && err.data.photo){
-      /* 秒传：展示已存在的照片 */
+      /* 秒传：换成已存在的那张 */
       n.photos = n.photos.filter(x => x.id !== p.id);
       const exist = mapPhoto(err.data.photo);
       if(!n.photos.some(x => x.id === exist.id)) n.photos.push(exist);
-      toast('已存在相同照片', 'ok');
-      renderGrid(n); renderList(); renderStats();
-    }else{
-      p.st = 'failed'; p.fail = errMsg(err, '上传失败');
-      renderGrid(n);
-      toast(errMsg(err, '上传失败，可重试'), 'err');
+      if(batch.total <= 1) toast('已存在相同照片', 'ok');
+      scheduleGrid(n);
+      return 'dup';
     }
+    p.st = 'failed'; p.fail = errMsg(err, '上传失败');
+    scheduleGrid(n);
+    if(batch.total <= 1) toast(errMsg(err, '上传失败，可重试'), 'err');
+    return 'failed';
   }
 }
 
-/* ================= 显影轮询（3s 直至 ready/failed） ================= */
-const pollMap = new Map();   // photoId -> {p,n}
+/* ================= 显影轮询（3s 直至 ready/failed） =================
+   按节点轮询而非按照片：GET /nodes/{id} 一次带回该节点全部照片状态，
+   所以一个节点里传 200 张也只是每 3 秒 1 个请求。 */
+const watchNodes = new Set();
 let pollT = null;
 function watch(p, n){
   if(p.st !== 'pending' && p.st !== 'processing') return;
-  pollMap.set(p.id, {p, n});
+  watchNodes.add(n.id);
   if(!pollT) pollT = setInterval(pollTick, 3000);
 }
 async function pollTick(){
-  for(const [id, {p, n}] of [...pollMap]){
+  for(const nodeId of [...watchNodes]){
+    const n = node(nodeId);
+    if(!n){ watchNodes.delete(nodeId); continue; }
     try{
-      const d = await api(`/photos/${id}`);
-      if(d.status === 'ready' || d.status === 'failed'){
-        pollMap.delete(id);
-        const file = p._file;
-        Object.assign(p, mapPhoto(d));
-        p._file = file;
-        if(state.sel === n.id) renderGrid(n);
-        if(d.status === 'failed') toast('1 张曝光失败，可重试', 'err');
+      const d = await api(`/nodes/${nodeId}`);
+      const fresh = new Map(d.photos.map(x => [x.id, x]));
+      let changed = 0, failed = 0, waiting = 0;
+      for(const p of n.photos){
+        const d2 = fresh.get(p.id);
+        if(d2 && d2.status !== p.st){
+          const file = p._file;
+          Object.assign(p, mapPhoto(d2));
+          p._file = file;
+          changed++;
+          if(p.st === 'failed') failed++;
+        }
+        if(p.st === 'pending' || p.st === 'processing') waiting++;
       }
+      if(!waiting) watchNodes.delete(nodeId);
+      if(changed) scheduleGrid(n);
+      if(failed) toast(`${failed} 张曝光失败，可重试`, 'err');
     }catch(err){
-      if(err.status === 404) pollMap.delete(id);
+      if(err.status === 404) watchNodes.delete(nodeId);
     }
   }
-  if(!pollMap.size){ clearInterval(pollT); pollT = null; }
+  if(!watchNodes.size){ clearInterval(pollT); pollT = null; }
 }
 
 /* ================= 卡片操作 + 拖拽排序 ================= */
@@ -829,6 +1062,27 @@ function bindCards(n){
           toast('已移入回收站', 'ok');
         }catch(err){
           toast(errMsg(err, '删除失败'), 'err');
+        }
+      }
+    }else if(op === 'move'){
+      if(String(p.id).startsWith('tmp-')){
+        toast('这张还在上传中，稍后再移', 'err');
+        return;
+      }
+      const target = await pickNode(n.id, `把「${p.cap}」移到：`);
+      if(!target) return;
+      try{
+        await api(`/photos/${p.id}`, {method: 'PATCH', body: {node_id: target}});
+        n.photos = n.photos.filter(x => x.id !== p.id);
+        const tn = node(target);
+        if(tn) tn.photos.push(p);          /* 服务端把它挂到目标节点末尾 */
+        renderGrid(n); renderList(); renderStats();
+        toast(`已移到「${tn ? tn.title : '目标节点'}」`, 'ok');
+      }catch(err){
+        if(err.status === 409){
+          toast('目标节点已有同一张照片', 'err');
+        }else{
+          toast(errMsg(err, '移动失败'), 'err');
         }
       }
     }else if(op === 'cover'){

@@ -99,13 +99,6 @@ func (b *tokenBucket) take() (bool, int) {
 	return false, wait
 }
 
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // rateLimit 中间件：超限返回 429 + Retry-After。
 func rateLimit(b *tokenBucket) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
