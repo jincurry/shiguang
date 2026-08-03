@@ -567,7 +567,7 @@
   </main>
 </div>
 
-<footer>PROTOTYPE — 接入真实照片：把 DATA 中第二项换成 url(图片地址)，懒加载 / 显影动画 / 失败占位 / 灯箱预载自动生效</footer>
+<footer>拾光集 · 家庭照片时间轴 · 底片在暗房里静静显影</footer>
 
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="查看大图">
   <div class="lb-viewport" id="lbViewport">
@@ -584,241 +584,366 @@
 <span class="sr-only" id="lbLive" aria-live="polite"></span>
 
 <script>
-/* ================= 示例数据（逆序） =================
-   接真实照片：['照片标题', 'url(https://your.cdn/photo.jpg)']
-   渐变占位与真实图片可混用，加载管线相同。            */
-const STARS =
-  'radial-gradient(1.2px 1.2px at 18% 24%,#fff,transparent),'+
-  'radial-gradient(1px 1px at 64% 12%,#ffeecf,transparent),'+
-  'radial-gradient(1.4px 1.4px at 82% 38%,#fff,transparent),'+
-  'radial-gradient(1px 1px at 36% 52%,#dfe9ff,transparent),'+
-  'radial-gradient(1.2px 1.2px at 50% 20%,#fff,transparent),';
+/* ================= 通用工具 =================
+   安全修复：所有动态文本一律走 textContent 或 esc() 转义后再插值，
+   杜绝原型中模板字符串 + innerHTML 直插 caption/title/description 的存储型 XSS */
+const API = '/api/v1';
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const reduceMotion = matchMedia('(prefers-reduced-motion:reduce)').matches;
 
-const DATA = [
-  {year:2026, nodes:[
-    {date:'2026-05-21', title:'黄山两日', desc:'云海来得比预报早，日出在光明顶。', photos:[
-      ['云海翻涌','linear-gradient(165deg,#8FA6B8 0%,#C9D7DF 42%,#EFE7D6 78%,#F6EFDF 100%)'],
-      ['迎客松','linear-gradient(160deg,#33402F 0%,#5C715E 45%,#A9BC8F 85%)'],
-      ['日出前的蓝','linear-gradient(180deg,#1E2A44 0%,#33415C 45%,#7A6C8C 78%,#C98A6B 100%)'],
-      ['山道石阶','linear-gradient(150deg,#4C463C 0%,#8A8578 55%,#CFC8B6 100%)'],
-      ['下山缆车','linear-gradient(200deg,#9FB4C4 0%,#D8DFE3 55%,#EAE0CC 100%)'],
-    ]},
-    {date:'2026-02-14', title:'家里的年夜饭', desc:'今年轮到我掌勺，八个菜一个汤。', photos:[
-      ['一桌菜','linear-gradient(155deg,#6E1423 0%,#A4243B 45%,#DB8A5A 85%)'],
-      ['贴春联','linear-gradient(170deg,#7F1D1D 0%,#B03A2E 55%,#E8B77E 100%)'],
-      ['守岁','linear-gradient(185deg,#221833 0%,#3D315B 50%,#8A6D9C 90%)'],
-    ]},
-  ]},
-  {year:2025, nodes:[
-    {date:'2025-10-03', title:'川西环线自驾', desc:'国庆七天，四姑娘山到色达。', photos:[
-      ['折多山垭口','linear-gradient(165deg,#5A6B80 0%,#8FA3B5 45%,#E3EAEF 100%)'],
-      ['牧场黄昏','linear-gradient(170deg,#7A4A28 0%,#C98A4B 48%,#F2DDB4 100%)'],
-      ['经幡','linear-gradient(150deg,#1F3A4A 0%,#2E5266 42%,#7FA8BC 80%,#D8E6EC 100%)'],
-      ['星空营地',STARS+'linear-gradient(180deg,#0B1026 0%,#1C2541 62%,#3A2F42 100%)'],
-      ['贡嘎远眺','linear-gradient(185deg,#8FA3B5 0%,#C9D5DE 40%,#F4F0E5 100%)'],
-      ['回程雨','linear-gradient(160deg,#4A5556 0%,#6E7F80 50%,#B9BFB4 100%)'],
-    ]},
-    {date:'2025-06-28', title:'毕业季', desc:'拨穗、合影、和宿舍的最后一晚。', photos:[
-      ['学位服','linear-gradient(175deg,#16222A 0%,#22333B 48%,#6E8898 100%)'],
-      ['全班合影','linear-gradient(160deg,#5A4C30 0%,#7C6A46 45%,#DCCBA4 100%)'],
-      ['空了的宿舍','linear-gradient(190deg,#6B6068 0%,#9A8F97 50%,#E3DEDA 100%)'],
-      ['校门口','linear-gradient(165deg,#33484F 0%,#4F6D7A 50%,#AFC9D4 100%)'],
-    ]},
-    {date:'2025-03-12', title:'阳台的第一盆花', desc:'风信子开了，紫色。', photos:[
-      ['风信子','linear-gradient(160deg,#463654 0%,#6D597A 45%,#C9A8E8 100%)'],
-      ['清晨浇水','linear-gradient(180deg,#8FBF94 0%,#B8D8BA 55%,#F3EBB0 100%)'],
-    ]},
-  ]},
-  {year:2024, nodes:[
-    {date:'2024-12-31', title:'跨年夜', desc:'江边人很多，烟花只放了十分钟。', photos:[
-      ['江边人群','linear-gradient(180deg,#1A1C2E 0%,#2B2D42 55%,#7D89A0 100%)'],
-      ['烟花','radial-gradient(140px 140px at 62% 26%,rgba(244,156,187,.85),transparent 62%),radial-gradient(90px 90px at 30% 44%,rgba(232,183,126,.7),transparent 62%),linear-gradient(185deg,#26060F 0%,#520120 60%,#7A2C42 100%)'],
-      ['凌晨的地铁','linear-gradient(170deg,#26333F 0%,#3A506B 52%,#8FA6B8 100%)'],
-    ]},
-    {date:'2024-08-09', title:'外婆的八十岁生日', desc:'全家二十一口人，难得凑齐。', photos:[
-      ['寿桃','linear-gradient(160deg,#9E2A3A 0%,#D1495B 48%,#F7DAC0 100%)'],
-      ['全家福','linear-gradient(170deg,#6B5A3B 0%,#8C7851 48%,#E7DCC9 100%)'],
-      ['老屋院子','linear-gradient(155deg,#40481F 0%,#606C38 48%,#D9A05B 100%)'],
-      ['切蛋糕','linear-gradient(175deg,#8A5A22 0%,#BC8034 50%,#F6E3CB 100%)'],
-    ]},
-  ]},
-];
+/* ================= 主题：与管理后台共用 localStorage 键 sg_theme ================= */
+if(localStorage.getItem('sg_theme') === 'light') document.body.classList.add('light');
 
-/* ================= 渲染时间轴 ================= */
-const tl = document.getElementById('timeline');
-let totalPhotos = 0, totalNodes = 0, seq = 0;
+/* ================= 浏览器端 BlurHash 解码（约 1KB，画到 canvas 当占位图） ================= */
+const B83 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~';
+function b83d(s){ let v = 0; for(const c of s) v = v * 83 + B83.indexOf(c); return v; }
+function s2l(v){ v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+function l2s(v){ v = Math.max(0, Math.min(1, v));
+  return Math.round((v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 255); }
+function sPow(v, e){ return Math.sign(v) * Math.pow(Math.abs(v), e); }
+function bhDecode(hash, w, h){
+  const sf = b83d(hash[0]), ny = Math.floor(sf / 9) + 1, nx = sf % 9 + 1;
+  const qm = (b83d(hash[1]) + 1) / 166;
+  const colors = [];
+  const dc = b83d(hash.substring(2, 6));
+  colors.push([s2l(dc >> 16), s2l(dc >> 8 & 255), s2l(dc & 255)]);
+  for(let i = 1; i < nx * ny; i++){
+    const v = b83d(hash.substring(4 + i * 2, 6 + i * 2));
+    colors.push([sPow((Math.floor(v / 361) - 9) / 9, 2) * qm,
+                 sPow((Math.floor(v / 19) % 19 - 9) / 9, 2) * qm,
+                 sPow((v % 19 - 9) / 9, 2) * qm]);
+  }
+  const px = new Uint8ClampedArray(w * h * 4);
+  for(let y = 0; y < h; y++) for(let x = 0; x < w; x++){
+    let r = 0, g = 0, b = 0;
+    for(let j = 0; j < ny; j++) for(let i = 0; i < nx; i++){
+      const basis = Math.cos(Math.PI * x * i / w) * Math.cos(Math.PI * y * j / h);
+      const c = colors[i + j * nx];
+      r += c[0] * basis; g += c[1] * basis; b += c[2] * basis;
+    }
+    const o = (y * w + x) * 4;
+    px[o] = l2s(r); px[o + 1] = l2s(g); px[o + 2] = l2s(b); px[o + 3] = 255;
+  }
+  return px;
+}
+function blurhashURL(hash, w = 32, h = 24){
+  try{
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').putImageData(new ImageData(bhDecode(hash, w, h), w, h), 0, 0);
+    return c.toDataURL();
+  }catch(_){ return ''; }
+}
 
-DATA.forEach(group=>{
-  tl.insertAdjacentHTML('beforeend',
-    `<div class="year reveal" id="y${group.year}"><strong>${group.year}</strong><span>${group.year} 年</span></div>`);
-  group.nodes.forEach(n=>{
-    totalNodes++;
-    const photos = n.photos.map(([cap],i)=>{
-      totalPhotos++; seq++;
-      return `
-      <figure class="photo" role="button" tabindex="-1" aria-label="查看：${cap}"
-        data-cap="${cap}" data-date="${n.date}" data-i="${i}">
-        <span class="clip" aria-hidden="true"></span>
-        <div class="print">
-          <div class="pic"><span class="ph-img"></span><i class="fail">曝光失败</i></div>
-          <figcaption><i>No.${String(seq).padStart(2,'0')}</i><b>${cap}</b></figcaption>
-        </div>
-      </figure>`;
-    }).join('');
-    tl.insertAdjacentHTML('beforeend', `
-      <article class="node reveal">
-        <button class="node-head" aria-expanded="false">
-          <span class="node-date">${n.date}</span>
-          <span class="node-title">${n.title}</span>
-          <span class="node-meta">×${n.photos.length}<span class="state"><span class="plus">＋</span></span></span>
-        </button>
-        <p class="node-desc">${n.desc}</p>
-        <div class="strip-wrap">
-          <div class="strip"><span class="wire" aria-hidden="true"></span>${photos}</div>
-        </div>
-      </article>`);
-    /* 把原始背景值挂到元素上（不经 HTML 属性，url 无需转义） */
-    tl.lastElementChild.querySelectorAll('.photo')
-      .forEach((el,i)=> el._bg = n.photos[i][1]);
-  });
-});
-document.getElementById('stats').innerHTML =
-  `<b>${totalNodes}</b> 个节点 · <b>${totalPhotos}</b> 张相纸 · 跨越 <b>${DATA.length}</b> 年`;
-
-document.querySelectorAll('.photo').forEach(p=>{
-  p.style.setProperty('--rot',  (Math.random()*2.6 - 1.3).toFixed(2)+'deg');
-  p.style.setProperty('--clipx',(Math.random()*22  - 11 ).toFixed(0)+'px');
-  p.style.setProperty('--d',    ((+p.dataset.i)*.05 + .18).toFixed(2)+'s');
-});
+/* ================= 滚动显影（开场结束后再启动，避免抢戏） ================= */
+const io = new IntersectionObserver(es => {
+  es.forEach(e => { if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+}, {threshold:.12});
+let revealActive = false;
+const revealQueue = [];
+function observeReveal(el){
+  el.classList.add('reveal');
+  if(revealActive) io.observe(el); else revealQueue.push(el);
+}
+const bootDelay = reduceMotion ? 0 : 1600;
+setTimeout(() => { revealActive = true; revealQueue.splice(0).forEach(el => io.observe(el)); }, bootDelay);
+setTimeout(() => document.body.classList.remove('boot'), reduceMotion ? 0 : 3200);
 
 /* ================= 显影加载管线 =================
-   url(...) → 真实图片：预载成功后显影，失败盖“曝光失败”章
-   渐变占位  → 模拟短暂显影延迟，演示同一条管线            */
-function develop(photoEl, fast=false){
+   blurhash 占位先上盘 → 真实 Image.onload 驱动显影；pending/processing 保持
+   未显影相纸并每 3s 轮询；failed 盖“曝光失败”章，title 带 fail_reason */
+function paintBlurhash(pic, p){
+  if(pic._bh || !p.blurhash) return;
+  pic._bh = 1;
+  const u = blurhashURL(p.blurhash);
+  if(u){ pic.style.backgroundImage = `url('${u}')`; pic.style.backgroundSize = 'cover'; }
+  else if(p.dominant){ pic.style.backgroundColor = p.dominant; }
+}
+function develop(photoEl, fast = false){
+  const p = photoEl._photo;
+  if(!p) return;
+  const pic = photoEl.querySelector('.pic');
+  const img = photoEl.querySelector('.ph-img');
+  if(p.status === 'failed'){
+    pic.classList.add('failed');
+    pic.querySelector('.fail').title = p.fail_reason || '';
+    return;
+  }
+  if(p.status !== 'ready'){       /* 显影中：轮询等待 */
+    watchPhoto(photoEl);
+    return;
+  }
   if(photoEl._loaded) return;
   photoEl._loaded = true;
-  const img = photoEl.querySelector('.ph-img');
-  const bg  = photoEl._bg || '';
-  const m   = bg.match(/url\(["']?([^"')]+)["']?\)/);
-  if(m){
-    const pre = new Image();
-    pre.onload  = ()=>{ img.style.backgroundImage = bg;
-                        requestAnimationFrame(()=>img.classList.add('dev')); };
-    pre.onerror = ()=>  img.closest('.pic').classList.add('failed');
-    pre.src = m[1];
-  }else{
-    img.style.backgroundImage = bg;
-    setTimeout(()=>img.classList.add('dev'), fast ? 60 : 240 + Math.random()*520);
-  }
+  pic.classList.remove('failed');
+  paintBlurhash(pic, p);
+  const url = p.variants && p.variants.thumb;
+  if(!url) return;
+  const pre = new Image();
+  pre.onload = () => { img.style.backgroundImage = `url('${url}')`;
+                       requestAnimationFrame(() => img.classList.add('dev')); };
+  pre.onerror = () => pic.classList.add('failed');
+  pre.src = url;
 }
+
+/* 3s 轮询 pending/processing 的照片直至 ready/failed */
+const watchMap = new Map();
+let pollTimer = null;
+function watchPhoto(el){
+  const p = el._photo;
+  if(!p || watchMap.has(p.id)) return;
+  watchMap.set(p.id, el);
+  paintBlurhash(el.querySelector('.pic'), p);
+  if(!pollTimer) pollTimer = setInterval(pollTick, 3000);
+}
+async function pollTick(){
+  for(const [id, el] of [...watchMap]){
+    try{
+      const res = await fetch(`${API}/photos/${id}`);
+      if(res.status === 404){ watchMap.delete(id); continue; }
+      if(!res.ok) continue;
+      const p = await res.json();
+      if(p.status === 'ready' || p.status === 'failed'){
+        watchMap.delete(id);
+        el._photo = p; el._loaded = false;
+        develop(el, true);
+      }
+    }catch(_){}
+  }
+  if(!watchMap.size){ clearInterval(pollTimer); pollTimer = null; }
+}
+
 /* 懒加载：照片带接近视口时先显影“封面”那张 */
-const lazyIO = new IntersectionObserver(es=>{
-  es.forEach(en=>{
+const lazyIO = new IntersectionObserver(es => {
+  es.forEach(en => {
     if(!en.isIntersecting) return;
     const cover = en.target.querySelector('.photo');
     if(cover) develop(cover);
     lazyIO.unobserve(en.target);
   });
-},{rootMargin:'400px 0px'});
-document.querySelectorAll('.strip-wrap').forEach(w=>lazyIO.observe(w));
+}, {rootMargin:'400px 0px'});
 
-/* ================= 拉线开关 ================= */
-const cord = document.getElementById('cord');
-cord.addEventListener('click', ()=>{
-  const light = document.body.classList.toggle('light');
-  cord.setAttribute('aria-pressed', light);
-  cord.classList.remove('pulled'); void cord.offsetWidth;
-  cord.classList.add('pulled');
-});
-
-/* ================= 年份侧边导航 ================= */
-const yearNav = document.getElementById('yearNav');
-yearNav.innerHTML = DATA.map(g=>
-  `<button class="yr" data-year="${g.year}"><span>${g.year}</span><i aria-hidden="true"></i></button>`).join('');
-yearNav.addEventListener('click', e=>{
-  const b = e.target.closest('.yr');
-  if(b) document.getElementById('y'+b.dataset.year)
-          ?.scrollIntoView({behavior:'smooth', block:'start'});
-});
-const yrBtns = [...yearNav.querySelectorAll('.yr')];
-function spy(){
-  const mark = scrollY + innerHeight*.35;
-  let cur = yrBtns[0]?.dataset.year;
-  DATA.forEach(g=>{
-    const el = document.getElementById('y'+g.year);
-    if(el && el.offsetTop <= mark) cur = String(g.year);
+/* 展开的照片带完全滚出视口时，自动收起 */
+const autoClose = new IntersectionObserver(es => {
+  es.forEach(en => {
+    if(en.isIntersecting) return;
+    const node = en.target.closest('.node');
+    if(node?.classList.contains('open')){
+      node.classList.remove('open');
+      node.querySelector('.node-head').setAttribute('aria-expanded','false');
+      node.querySelectorAll('.photo').forEach(p => p.tabIndex = -1);
+    }
   });
-  yrBtns.forEach(b=>b.classList.toggle('act', b.dataset.year===cur));
-}
-let spyTick = false;
-addEventListener('scroll', ()=>{
-  if(!spyTick){ spyTick=true; requestAnimationFrame(()=>{ spy(); spyTick=false; }); }
-},{passive:true});
-spy();
+}, {threshold:0});
 
-/* ================= 节点展开 / 收起 ================= */
-document.querySelectorAll('.node').forEach(node=>{
+/* ================= 渲染时间轴（游标分页增量渲染） ================= */
+const tl = document.getElementById('timeline');
+const yearNav = document.getElementById('yearNav');
+let nextCursor = null, loading = false, firstLoad = true, done = false;
+let seq = 0, lastYear = '';
+const years = [];
+let yrBtns = [];
+
+function refreshYearNav(){
+  yearNav.innerHTML = years.map(y =>
+    `<button class="yr" data-year="${esc(y)}"><span>${esc(y)}</span><i aria-hidden="true"></i></button>`).join('');
+  yrBtns = [...yearNav.querySelectorAll('.yr')];
+  spy();
+}
+
+function buildPhoto(p, date, i){
+  seq++;
+  const fig = document.createElement('figure');
+  fig.className = 'photo';
+  fig.setAttribute('role','button');
+  fig.tabIndex = -1;
+  fig.dataset.i = i;
+  fig.dataset.date = date;
+  fig.dataset.pid = p.id;
+  fig._photo = p;
+  fig.innerHTML = `
+    <span class="clip" aria-hidden="true"></span>
+    <div class="print">
+      <div class="pic"><span class="ph-img"></span><i class="fail">曝光失败</i></div>
+      <figcaption><i>No.${String(seq).padStart(2,'0')}</i><b></b></figcaption>
+    </div>`;
+  fig.querySelector('figcaption b').textContent = p.caption;
+  fig.setAttribute('aria-label', '查看：' + p.caption);
+  return fig;
+}
+
+function buildNode(n){
+  const y = n.date.slice(0, 4);
+  if(y !== lastYear){
+    lastYear = y;
+    years.push(y);
+    const yd = document.createElement('div');
+    yd.className = 'year';
+    yd.id = 'y' + y;
+    yd.innerHTML = '<strong></strong><span></span>';
+    yd.querySelector('strong').textContent = y;
+    yd.querySelector('span').textContent = y + ' 年';
+    observeReveal(yd);
+    tl.appendChild(yd);
+    refreshYearNav();
+  }
+  const art = document.createElement('article');
+  art.className = 'node';
+  art.innerHTML = `
+    <button class="node-head" aria-expanded="false">
+      <span class="node-date"></span>
+      <span class="node-title"></span>
+      <span class="node-meta"><span class="pcount"></span><span class="state"><span class="plus">＋</span></span></span>
+    </button>
+    <p class="node-desc"></p>
+    <div class="strip-wrap">
+      <div class="strip"><span class="wire" aria-hidden="true"></span></div>
+    </div>`;
+  art.querySelector('.node-date').textContent = n.date;
+  art.querySelector('.node-title').textContent = n.title;
+  art.querySelector('.pcount').textContent = '×' + n.photo_count;
+  art.querySelector('.node-desc').textContent = n.description;
+  const strip = art.querySelector('.strip');
+  n.photos.forEach((p, i) => strip.appendChild(buildPhoto(p, n.date, i)));
+  art.querySelectorAll('.photo').forEach(p => {
+    p.style.setProperty('--rot',  (Math.random() * 2.6 - 1.3).toFixed(2) + 'deg');
+    p.style.setProperty('--clipx',(Math.random() * 22  - 11 ).toFixed(0) + 'px');
+    p.style.setProperty('--d',    ((+p.dataset.i) * .05 + .18).toFixed(2) + 's');
+  });
+  bindNode(art);
+  observeReveal(art);
+  tl.appendChild(art);
+}
+
+/* 节点展开 / 收起 + 桌面端按住拖动横滚 */
+function bindNode(node){
   const head = node.querySelector('.node-head');
   const wrap = node.querySelector('.strip-wrap');
-  const toggle = ()=>{
+  const toggle = () => {
     const open = node.classList.toggle('open');
     head.setAttribute('aria-expanded', open);
-    node.querySelectorAll('.photo').forEach(p=>p.tabIndex = open?0:-1);
+    node.querySelectorAll('.photo').forEach(p => p.tabIndex = open ? 0 : -1);
     if(open){
       wrap.scrollLeft = 0;
-      node.querySelectorAll('.photo').forEach(p=>develop(p));   /* 展开即全部显影 */
+      node.querySelectorAll('.photo').forEach(p => develop(p));   /* 展开即全部显影 */
       const wire = node.querySelector('.wire');
-      if(wire) wire.style.transformOrigin = (wrap.clientWidth/2)+'px 50%';
-      /* 自动对位：照片带若被屏幕下缘裁掉，轻滚页面让整条晾片线入镜 */
-      requestAnimationFrame(()=>{
+      if(wire) wire.style.transformOrigin = (wrap.clientWidth / 2) + 'px 50%';
+      requestAnimationFrame(() => {
         const r = wrap.getBoundingClientRect();
         const need = r.bottom - (innerHeight - 16);
         if(need > 0){
-          const room = Math.max(0, r.top - 96);   /* 但别把标题顶出屏幕 */
+          const room = Math.max(0, r.top - 96);
           if(room > 0) window.scrollBy({top: Math.min(need, room), behavior:'smooth'});
         }
       });
     }
   };
   head.addEventListener('click', toggle);
-  wrap.addEventListener('click', ()=>{ if(!node.classList.contains('open')) toggle(); });
-});
+  wrap.addEventListener('click', () => { if(!node.classList.contains('open')) toggle(); });
 
-/* 展开的照片带完全滚出视口时，自动收起 */
-const autoClose = new IntersectionObserver(es=>{
-  es.forEach(en=>{
-    if(en.isIntersecting) return;
-    const node = en.target.closest('.node');
-    if(node?.classList.contains('open')){
-      node.classList.remove('open');
-      node.querySelector('.node-head').setAttribute('aria-expanded','false');
-      node.querySelectorAll('.photo').forEach(p=>p.tabIndex = -1);
-    }
+  let down = false, sx = 0, sl = 0, moved = false;
+  wrap.addEventListener('pointerdown', e => {
+    if(e.pointerType !== 'mouse') return;
+    if(!node.classList.contains('open')) return;
+    down = true; moved = false; sx = e.clientX; sl = wrap.scrollLeft;
   });
-},{threshold:0});
-document.querySelectorAll('.strip-wrap').forEach(w=>autoClose.observe(w));
-
-/* ================= 桌面端：晾片带按住拖动横滚 ================= */
-document.querySelectorAll('.strip-wrap').forEach(wrap=>{
-  let down=false, sx=0, sl=0, moved=false;
-  wrap.addEventListener('pointerdown', e=>{
-    if(e.pointerType!=='mouse') return;
-    if(!wrap.closest('.node').classList.contains('open')) return;
-    down=true; moved=false; sx=e.clientX; sl=wrap.scrollLeft;
-  });
-  wrap.addEventListener('pointermove', e=>{
+  wrap.addEventListener('pointermove', e => {
     if(!down) return;
     const d = e.clientX - sx;
-    if(Math.abs(d)>6){ moved=true; wrap.classList.add('dragging'); }
+    if(Math.abs(d) > 6){ moved = true; wrap.classList.add('dragging'); }
     if(moved) wrap.scrollLeft = sl - d;
   });
-  const end = ()=>{ down=false; wrap.classList.remove('dragging'); };
+  const end = () => { down = false; wrap.classList.remove('dragging'); };
   wrap.addEventListener('pointerup', end);
   wrap.addEventListener('pointerleave', end);
-  wrap.addEventListener('click', e=>{
-    if(moved){ e.stopPropagation(); e.preventDefault(); moved=false; }
+  wrap.addEventListener('click', e => {
+    if(moved){ e.stopPropagation(); e.preventDefault(); moved = false; }
   }, true);
+
+  lazyIO.observe(wrap);
+  autoClose.observe(wrap);
+}
+
+/* 无限滚动：底部哨兵 + next_cursor */
+const sentinel = document.createElement('div');
+sentinel.style.height = '1px';
+document.querySelector('main').appendChild(sentinel);
+const sentinelIO = new IntersectionObserver(es => {
+  es.forEach(e => { if(e.isIntersecting && !done && !loading && !firstLoad) loadPage(); });
+}, {rootMargin:'600px 0px'});
+
+async function loadPage(){
+  if(loading || done) return;
+  loading = true;
+  try{
+    const q = nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}&limit=10` : '?limit=10';
+    const res = await fetch(API + '/timeline' + q);
+    if(!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    data.items.forEach(buildNode);
+    nextCursor = data.next_cursor;
+    if(!nextCursor){ done = true; sentinelIO.disconnect(); }
+    spy();
+  }catch(err){
+    if(firstLoad){
+      tl.textContent = '';
+      const msg = document.createElement('p');
+      msg.style.cssText = 'color:var(--muted);font-family:var(--mono);font-size:12px;letter-spacing:.15em;padding:40px 0';
+      msg.textContent = err.message === '401' ? '相册未公开，需要访问授权' : '时间轴加载失败，请稍后刷新重试';
+      tl.appendChild(msg);
+      done = true;
+    }
+  }finally{
+    loading = false;
+    firstLoad = false;
+  }
+}
+
+/* 统计条：GET /api/v1/stats（年份跨度由前端派生） */
+fetch(API + '/stats').then(r => r.ok ? r.json() : null).then(s => {
+  if(!s) return;
+  const el = document.getElementById('stats');
+  const span = (s.year_min && s.year_max) ? (+s.year_max - +s.year_min + 1) : 0;
+  el.textContent = '';
+  const frag = [['', s.node_count, ' 个节点 · '], ['', s.photo_count, ' 张相纸 · 跨越 '], ['', span, ' 年']];
+  frag.forEach(([_, num, tail]) => {
+    const b = document.createElement('b');
+    b.textContent = num;
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(tail));
+  });
+}).catch(() => {});
+
+/* ================= 拉线开关（主题持久化到 sg_theme） ================= */
+const cord = document.getElementById('cord');
+cord.setAttribute('aria-pressed', document.body.classList.contains('light'));
+cord.addEventListener('click', () => {
+  const light = document.body.classList.toggle('light');
+  localStorage.setItem('sg_theme', light ? 'light' : 'dark');
+  cord.setAttribute('aria-pressed', light);
+  cord.classList.remove('pulled'); void cord.offsetWidth;
+  cord.classList.add('pulled');
 });
+
+/* ================= 年份侧边导航 ================= */
+yearNav.addEventListener('click', e => {
+  const b = e.target.closest('.yr');
+  if(b) document.getElementById('y' + b.dataset.year)
+          ?.scrollIntoView({behavior:'smooth', block:'start'});
+});
+function spy(){
+  const mark = scrollY + innerHeight * .35;
+  let cur = yrBtns[0]?.dataset.year;
+  years.forEach(y => {
+    const el = document.getElementById('y' + y);
+    if(el && el.offsetTop <= mark) cur = y;
+  });
+  yrBtns.forEach(b => b.classList.toggle('act', b.dataset.year === cur));
+}
+let spyTick = false;
+addEventListener('scroll', () => {
+  if(!spyTick){ spyTick = true; requestAnimationFrame(() => { spy(); spyTick = false; }); }
+}, {passive:true});
 
 /* ================= 灯箱 ================= */
 const lb        = document.getElementById('lightbox');
@@ -828,17 +953,17 @@ const lbDots    = document.getElementById('lbDots');
 const lbFooter  = document.getElementById('lbFooter');
 const lbLive    = document.getElementById('lbLive');
 const lbCloseBtn= document.getElementById('lbClose');
-const reduceMotion = matchMedia('(prefers-reduced-motion:reduce)').matches;
 
 let album=[], idx=0, W=0, animating=false, swiped=false, lastFocus=null;
 
 const wrapIdx = i => (i + album.length) % album.length;
 const lbRGB = ()=> document.body.classList.contains('light') ? '243,238,228' : '14,12,10';
+/* 灯箱用 md 变体；所有文本与 URL 一律 esc() 后插值 */
 const cardHTML = p => `
   <div class="lb-card">
     <figure class="lb-frame">
-      <div class="lb-zoom"><div class="lb-pic" style="background-image:${p.bg}"></div></div>
-      <figcaption class="lb-bar"><b>${p.cap}</b><span>${p.date}</span></figcaption>
+      <div class="lb-zoom"><div class="lb-pic" data-lg="${esc(p.lg)}" style="background-image:url('${esc(p.md)}')"></div></div>
+      <figcaption class="lb-bar"><b>${esc(p.cap)}</b><span>${esc(p.date)}</span></figcaption>
     </figure>
   </div>`;
 
@@ -848,6 +973,13 @@ const centerPic = ()=> track.children[1]?.querySelector('.lb-pic');
 const zoomRect  = ()=> track.children[1]?.querySelector('.lb-zoom')?.getBoundingClientRect();
 function applyZoom(anim=false){
   const pic = centerPic(); if(!pic) return;
+  /* 双指放大超过 2x 时切换到 lg 大图 */
+  if(zs > 2 && pic.dataset.lg && !pic._lgUp){
+    pic._lgUp = 1;
+    const url = pic.dataset.lg, im = new Image();
+    im.onload = () => { pic.style.backgroundImage = `url('${url}')`; };
+    im.src = url;
+  }
   pic.style.transition = anim && !reduceMotion
     ? 'transform .3s cubic-bezier(.22,.9,.3,1)' : 'none';
   pic.style.transform = `translate(${ztx}px,${zty}px) scale(${zs})`;
@@ -912,11 +1044,16 @@ function jump(i){
     });
   },160);
 }
-function openLB(node, i){
-  album = [...node.querySelectorAll('.photo')].map(el=>({
-    bg: el._bg, cap: el.dataset.cap, date: el.dataset.date
+function openLB(node, photoEl){
+  const readys = [...node.querySelectorAll('.photo')].filter(el => el._photo?.status === 'ready');
+  if(!readys.length) return;
+  album = readys.map(el => ({
+    md:  el._photo.variants.md || el._photo.variants.thumb || '',
+    lg:  el._photo.variants.lg || '',
+    cap: el._photo.caption,
+    date: el.dataset.date
   }));
-  idx = i;
+  idx = Math.max(0, readys.indexOf(photoEl));
   lastFocus = document.activeElement;                 /* 记住来源，关闭时归还焦点 */
   lb.classList.add('on','first-open');
   setTimeout(()=>lb.classList.remove('first-open'), 420);
@@ -1080,7 +1217,10 @@ document.addEventListener('click', e=>{
   const dot = e.target.closest('.lb-dots button');
   if(dot){ jump([...lbDots.children].indexOf(dot)); return; }
   const p = e.target.closest('.node.open .photo');
-  if(p){ openLB(p.closest('.node'), +p.dataset.i); return; }
+  if(p){
+    if(p._photo?.status === 'ready') openLB(p.closest('.node'), p);
+    return;
+  }
   if(lb.classList.contains('on') && !justDragged &&
      e.target.classList.contains('lb-card')) closeLB();
 });
@@ -1108,16 +1248,8 @@ document.addEventListener('keydown', e=>{
 });
 addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); });
 
-/* ================= 滚动显影（开场结束后再启动，避免抢戏） ================= */
-const io = new IntersectionObserver(es=>{
-  es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
-},{threshold:.12});
-const bootDelay = reduceMotion ? 0 : 1600;
-setTimeout(()=>{
-  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-}, bootDelay);
-/* 开场序列播完后摘掉 boot，拉绳恢复普通点按动画 */
-setTimeout(()=>document.body.classList.remove('boot'), reduceMotion ? 0 : 3200);
+/* ================= 首屏加载 ================= */
+loadPage().then(() => sentinelIO.observe(sentinel));
 </script>
 </body>
 </html>
