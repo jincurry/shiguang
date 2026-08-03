@@ -58,16 +58,15 @@ func Run(ctx context.Context, c *Client, opt Options) (*Result, error) {
 		opt.MaxBytes = 30 << 20
 	}
 
-	photos, skipped, err := Scan(opt.Root, opt.MaxBytes)
+	groups, photos, warnings, err := ScanAndPlan(opt.Root, opt.GroupMode, opt.SingleTitle, opt.MaxBytes)
 	if err != nil {
 		return nil, err
 	}
-	res := &Result{Errors: skipped}
+	res := &Result{Errors: warnings}
 	if len(photos) == 0 {
 		res.Elapsed = time.Since(start)
 		return res, nil
 	}
-	groups := Plan(photos, opt.GroupMode, opt.SingleTitle)
 	res.Total = len(photos)
 
 	if opt.DryRun {
@@ -107,7 +106,7 @@ func Run(ctx context.Context, c *Client, opt Options) (*Result, error) {
 		if ok {
 			res.NodesReused++
 		} else {
-			n, err := c.CreateNode(ctx, g.Date, g.Title, "")
+			n, err := c.CreateNode(ctx, g.Date, g.Title, g.Description)
 			if err != nil {
 				mu.Lock()
 				stat.Failed += len(g.Photos)
@@ -188,8 +187,12 @@ func uploadGroup(ctx context.Context, c *Client, opt Options, nodeID string, g *
 
 // uploadOne 上传单张：local 走 multipart，s3 走 presign → PUT → confirm。
 func uploadOne(ctx context.Context, c *Client, opt Options, nodeID string, p *Photo) error {
-	// 图注取文件名（去扩展名），截断到服务端 200 字上限
-	caption := clampRunes(strings.TrimSuffix(p.Name, filepath.Ext(p.Name)), 200)
+	// 图注优先用清单里写的，没有才回落到文件名（去扩展名）
+	caption := p.Caption
+	if caption == "" {
+		caption = strings.TrimSuffix(p.Name, filepath.Ext(p.Name))
+	}
+	caption = clampRunes(caption, 200)
 	if opt.UploadMode == "s3" {
 		var uploadURL, photoID string
 		if err := withRetry(ctx, 5, func() error {

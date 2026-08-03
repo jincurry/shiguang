@@ -38,11 +38,23 @@ import 选项：
   --concurrency <n>   并发上传数（默认 4）
   --max-mb <n>        单张大小上限 MB（默认 30，需与服务端一致）
   --dry-run           只扫描并打印将要创建的节点，不上传
+  --emit-manifest     在各节点目录生成 shiguang.txt 模板供编辑（不覆盖已有）
   --timeout <dur>     单次请求超时（默认 5m）
 
 示例：
   sgctl import ~/Photos --server https://photos.example.com --token $SG_ADMIN_TOKEN
   sgctl import ./老照片 --group folder --dry-run
+  sgctl import ./老照片 --emit-manifest      # 先生成清单，改完再导入
+
+指定日期与文案：在照片目录里放一个 shiguang.txt（可用 --emit-manifest 生成）：
+
+  date = 2019-10-06
+  title = 小妹的婚礼
+  description = 全家去了三亚，海边办的
+  DSC1000.jpg = 接亲那天早上
+  DSC1001.jpg = 海边仪式
+
+没有这个文件时，一切按自动推导走，行为与不用清单完全一致。
 
 重跑安全：照片按内容去重，中断后重跑会自动跳过已导入的，只补没传完的部分。
 `
@@ -82,6 +94,7 @@ func runImport(args []string) error {
 		concurrency = fs.Int("concurrency", 4, "")
 		maxMB       = fs.Int64("max-mb", 30, "")
 		dryRun      = fs.Bool("dry-run", false, "")
+		emit        = fs.Bool("emit-manifest", false, "")
 		timeout     = fs.Duration("timeout", 5*time.Minute, "")
 	)
 	// flag 包在首个位置参数处停止解析，而文档用法是 `import <目录> [选项]`，
@@ -103,7 +116,7 @@ func runImport(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *token == "" && !*dryRun {
+	if *token == "" && !*dryRun && !*emit {
 		return errors.New("缺少管理口令：用 --token 指定，或设置环境变量 SG_ADMIN_TOKEN")
 	}
 
@@ -121,7 +134,7 @@ func runImport(args []string) error {
 	}
 
 	var client *importer.Client
-	if !*dryRun {
+	if !*dryRun && !*emit {
 		client, err = importer.NewClient(*server, *token, *timeout)
 		if err != nil {
 			return err
@@ -138,49 +151,16 @@ func runImport(args []string) error {
 		fmt.Printf("已连接 %s（存储模式：%s）\n", *server, mode)
 	}
 
-	// dry-run 先把计划打出来
-	if *dryRun {
-		photos, skipped, err := importer.Scan(root, opt.MaxBytes)
+	// dry-run 与 emit 都只需要前置的扫描/分组/套清单，走与真正导入同一条路径
+	if *dryRun || *emit {
+		groups, photos, warnings, err := importer.ScanAndPlan(root, mode, *title, opt.MaxBytes)
 		if err != nil {
 			return err
 		}
-		groups := importer.Plan(photos, mode, *title)
-		fmt.Printf("扫描 %s：%d 张可导入照片，将归入 %d 个节点\n\n", root, len(photos), len(groups))
-
-		var noEXIF []*importer.Group
-		for _, g := range groups {
-			mark := "  "
-			if !g.DateFromEXIF {
-				mark = "⚠ " // 日期来自文件修改时间，多半不是真实拍摄日
-				noEXIF = append(noEXIF, g)
-			}
-			fmt.Printf("  %s%s  %-28s %3d 张（%d 张带 EXIF 拍摄时间）\n",
-				mark, g.Date, truncate(g.Title, 28), len(g.Photos), g.EXIFCount())
+		if *emit {
+			return emitManifests(root, groups, mode, warnings)
 		}
-
-		if len(noEXIF) > 0 {
-			fmt.Printf("\n⚠ 有 %d 个节点的日期来自「文件修改时间」而非 EXIF 拍摄时间：\n", len(noEXIF))
-			for i, g := range noEXIF {
-				if i >= 8 {
-					fmt.Printf("    …… 另有 %d 个\n", len(noEXIF)-8)
-					break
-				}
-				fmt.Printf("    %s  %s\n", g.Date, g.Title)
-			}
-			fmt.Println("  扫描件、被聊天软件转发过的照片通常没有 EXIF，这些日期多半不是真实拍摄日。")
-			fmt.Println("  导入后请在管理后台逐个核对修改；或先按事件整理成文件夹，导入后改节点日期更省事。")
-		}
-
-		if len(skipped) > 0 {
-			fmt.Printf("\n跳过 %d 个文件：\n", len(skipped))
-			for i, s := range skipped {
-				if i >= 10 {
-					fmt.Printf("  …… 另有 %d 个\n", len(skipped)-10)
-					break
-				}
-				fmt.Printf("  %s\n", s)
-			}
-		}
+		printPlan(root, groups, photos, warnings)
 		fmt.Println("\n这是 --dry-run，没有上传任何东西。去掉该参数即可真正导入。")
 		return nil
 	}
@@ -244,6 +224,110 @@ func runImport(args []string) error {
 	if res.Uploaded > 0 {
 		fmt.Println("\n照片正在后台显影，稍后刷新前台时间轴即可看到。")
 	}
+	return nil
+}
+
+// printPlan 打印将要创建的节点，并标注日期可信度与各类警告。
+func printPlan(root string, groups []*importer.Group, photos []*importer.Photo, warnings []string) {
+	fmt.Printf("扫描 %s：%d 张可导入照片，将归入 %d 个节点\n\n", root, len(photos), len(groups))
+
+	var untrusted []*importer.Group
+	captioned := 0
+	for _, p := range photos {
+		if p.Caption != "" {
+			captioned++
+		}
+	}
+	for _, g := range groups {
+		mark := "  "
+		switch {
+		case g.DateFromManifest:
+			mark = "✎ " // 日期由清单指定
+		case !g.DateFromEXIF:
+			mark = "⚠ " // 日期来自文件修改时间，多半不是真实拍摄日
+			untrusted = append(untrusted, g)
+		}
+		fmt.Printf("  %s%s  %-28s %3d 张（%d 张带 EXIF 拍摄时间）\n",
+			mark, g.Date, truncate(g.Title, 28), len(g.Photos), g.EXIFCount())
+		if g.Description != "" {
+			fmt.Printf("      描述：%s\n", truncate(g.Description, 60))
+		}
+	}
+	if captioned > 0 {
+		fmt.Printf("\n✎ 清单文件生效：%d 张照片使用了自定义图注\n", captioned)
+	}
+
+	if len(untrusted) > 0 {
+		fmt.Printf("\n⚠ 有 %d 个节点的日期来自「文件修改时间」而非 EXIF 拍摄时间：\n", len(untrusted))
+		for i, g := range untrusted {
+			if i >= 8 {
+				fmt.Printf("    …… 另有 %d 个\n", len(untrusted)-8)
+				break
+			}
+			fmt.Printf("    %s  %s\n", g.Date, g.Title)
+		}
+		fmt.Println("  扫描件、被聊天软件转发过的照片通常没有 EXIF，这些日期多半不是真实拍摄日。")
+		fmt.Printf("  可用 --emit-manifest 生成 %s 后填写正确日期，或导入后在后台修改。\n",
+			importer.ManifestName)
+	}
+
+	if len(warnings) > 0 {
+		fmt.Printf("\n以下 %d 项需要注意：\n", len(warnings))
+		for i, s := range warnings {
+			if i >= 10 {
+				fmt.Printf("  …… 另有 %d 项\n", len(warnings)-10)
+				break
+			}
+			fmt.Printf("  %s\n", s)
+		}
+	}
+}
+
+// emitManifests 生成清单模板并汇报结果。
+func emitManifests(root string, groups []*importer.Group, mode importer.GroupMode,
+	warnings []string) error {
+
+	res, err := importer.EmitManifests(root, groups, mode)
+	if err != nil {
+		return err
+	}
+	if len(res.Written) > 0 {
+		fmt.Printf("已生成 %d 份清单模板：\n", len(res.Written))
+		for _, p := range res.Written {
+			fmt.Printf("  %s\n", p)
+		}
+	}
+	if len(res.Skipped) > 0 {
+		fmt.Printf("\n已存在、未覆盖 %d 份（你的改动不会被冲掉）：\n", len(res.Skipped))
+		for i, p := range res.Skipped {
+			if i >= 10 {
+				fmt.Printf("  …… 另有 %d 份\n", len(res.Skipped)-10)
+				break
+			}
+			fmt.Printf("  %s\n", p)
+		}
+	}
+	if len(res.NoDir) > 0 {
+		fmt.Printf("\n以下 %d 个节点没有唯一对应的目录，无处安放清单：\n", len(res.NoDir))
+		for i, g := range res.NoDir {
+			if i >= 8 {
+				fmt.Printf("  …… 另有 %d 个\n", len(res.NoDir)-8)
+				break
+			}
+			fmt.Printf("  %s  %s（%d 张）\n", g.Date, g.Title, len(g.Photos))
+		}
+		fmt.Println("  这些是散在根目录、按拍摄日期归组的照片。把它们放进子文件夹，")
+		fmt.Println("  或改用 --group folder / --group single，就能为其生成清单。")
+	}
+	for _, w := range warnings {
+		fmt.Printf("  %s\n", w)
+	}
+	if len(res.Written) == 0 && len(res.Skipped) == 0 {
+		fmt.Println("没有生成任何清单。")
+		return nil
+	}
+	fmt.Printf("\n用文本编辑器改完这些 %s，再运行一次 sgctl import 即可按清单导入。\n",
+		importer.ManifestName)
 	return nil
 }
 

@@ -49,17 +49,22 @@ type Photo struct {
 	Ext     string    // jpg|png|webp（按魔数判定，不信任扩展名）
 	TakenAt time.Time // EXIF 拍摄时间；取不到时为文件修改时间
 	HasEXIF bool      // TakenAt 是否来自 EXIF
+	// Caption 来自同目录清单文件；为空时上传阶段回落到文件名（去扩展名）。
+	Caption string
 }
 
 // Group 是一个待创建/复用的时间轴节点及其照片。
 type Group struct {
-	Date   string // YYYY-MM-DD，取组内最早的拍摄时间
-	Title  string
-	Photos []*Photo
+	Date        string // YYYY-MM-DD，取组内最早的拍摄时间
+	Title       string
+	Description string // 仅来自清单文件；否则为空
+	Photos      []*Photo
 	// DateFromEXIF 表示决定 Date 的那张照片是否带 EXIF 拍摄时间。
 	// 为 false 说明日期来自文件修改时间——扫描的老照片、被聊天软件转发过的
 	// 图片都属此类，日期通常与实际拍摄日无关，导入后需要人工核对。
 	DateFromEXIF bool
+	// DateFromManifest 表示日期由清单文件显式指定，此时无需再提示可信度。
+	DateFromManifest bool
 }
 
 // EXIFCount 返回组内带 EXIF 拍摄时间的照片数。
@@ -251,6 +256,40 @@ func Plan(photos []*Photo, mode GroupMode, singleTitle string) []*Group {
 		return out[i].Title < out[j].Title
 	})
 	return out
+}
+
+// ScanAndPlan 是扫描 → 分组 → 套用清单的完整前置流程，dry-run 与真正导入
+// 共用同一条路径，保证「预览到什么就导入什么」。
+// 返回的 warnings 包含跳过的文件与清单相关提示。
+func ScanAndPlan(root string, mode GroupMode, singleTitle string, maxBytes int64) (
+	groups []*Group, photos []*Photo, warnings []string, err error) {
+
+	photos, skipped, err := Scan(root, maxBytes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	warnings = append(warnings, skipped...)
+	if len(photos) == 0 {
+		return nil, nil, warnings, nil
+	}
+	groups = Plan(photos, mode, singleTitle)
+
+	manifests, err := LoadManifests(root)
+	if err != nil {
+		// 清单读不了不该挡住导入，降级为警告
+		warnings = append(warnings, fmt.Sprintf("读取清单文件失败：%v", err))
+		return groups, photos, warnings, nil
+	}
+	warnings = append(warnings, ApplyManifests(root, photos, groups, manifests, mode)...)
+
+	// 清单可能改了标题/日期，重新按日期倒序排一次，保持展示与写入顺序一致
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Date != groups[j].Date {
+			return groups[i].Date > groups[j].Date
+		}
+		return groups[i].Title < groups[j].Title
+	})
+	return groups, photos, warnings, nil
 }
 
 // topLevelDir 返回相对路径的第一层目录名；文件直接位于根时返回空串。
