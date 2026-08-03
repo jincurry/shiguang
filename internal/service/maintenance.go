@@ -42,7 +42,7 @@ func (s *Service) Reap(ctx context.Context) (int, error) {
 		if err != nil || !ok {
 			continue // 竞争中被 confirm 走了，跳过
 		}
-		if err := s.st.MarkPhotoFailed(ctx, sess.PhotoID, "上传未完成", store.Now()); err != nil {
+		if err := s.st.MarkPhotoFailed(ctx, sess.PhotoID, failUploadIncomplete, store.Now()); err != nil {
 			s.log.Error("reap: mark failed", "photo", sess.PhotoID, "err", err)
 		}
 		if err := s.bl.Delete(ctx, sess.ObjectKey); err != nil {

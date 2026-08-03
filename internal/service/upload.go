@@ -17,6 +17,30 @@ import (
 	"shiguang/internal/store"
 )
 
+// 上传失败原因常量。重复 confirm 时要据此还原出与首次相同的错误，
+// 否则用户会看到"会话已过期"这种与真实原因无关的误导性提示。
+const (
+	failUploadIncomplete = "上传未完成"
+	failSizeMismatch     = "对象大小与声明不符"
+	failReadBack         = "对象读取失败"
+	failNotAnImage       = "文件不是有效图片"
+)
+
+// errForFailReason 把已记录的失败原因还原成对应的语义错误，
+// 使得对同一张失败照片重复 confirm 得到稳定一致的响应。
+func errForFailReason(reason string) error {
+	switch reason {
+	case failNotAnImage:
+		return ErrUnsupportedMedia
+	case failSizeMismatch:
+		return Validationf("%s", failSizeMismatch)
+	case failReadBack:
+		return fmt.Errorf("%w: %s", ErrStorage, failReadBack)
+	default: // 含 failUploadIncomplete：会话确实过期了
+		return ErrSessionExpired
+	}
+}
+
 // maxUploadBytes 返回单张上限字节数。
 func (s *Service) maxUploadBytes() int64 { return s.cfg.UploadLimitMB << 20 }
 
@@ -206,6 +230,12 @@ func (s *Service) ConfirmUpload(ctx context.Context, photoID string) (*PhotoDTO,
 		if p.Status == "processing" || p.Status == "ready" {
 			return s.photoDTO(ctx, p), nil // confirm 幂等：已转正直接返回
 		}
+		// 会话已被终结（文件无效、大小不符、或 reaper 判过期）。重复 confirm
+		// 要还原出与首次相同的错误——否则"文件不是有效图片"会变成
+		// "会话已过期，请重新上传"，把人往错误方向引。
+		if p.Status == "failed" && p.FailReason != nil {
+			return nil, errForFailReason(*p.FailReason)
+		}
 		return nil, ErrSessionExpired
 	}
 	if err != nil {
@@ -215,7 +245,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, photoID string) (*PhotoDTO,
 	expiresAt, err := store.ParseTime(sess.ExpiresAt)
 	if err == nil && time.Now().After(expiresAt) {
 		s.st.SetSessionState(ctx, sess.ID, "expired")
-		s.st.MarkPhotoFailed(ctx, photoID, "上传未完成", store.Now())
+		s.st.MarkPhotoFailed(ctx, photoID, failUploadIncomplete, store.Now())
 		s.bl.Delete(ctx, sess.ObjectKey)
 		return nil, ErrSessionExpired
 	}
@@ -228,7 +258,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, photoID string) (*PhotoDTO,
 		return nil, fmt.Errorf("%w: %v", ErrStorage, err)
 	}
 	if size != sess.ExpectSize {
-		s.abortSession(ctx, sess, photoID, "对象大小与声明不符")
+		s.abortSession(ctx, sess, photoID, failSizeMismatch)
 		return nil, Validationf("对象大小与声明不符：got %d want %d", size, sess.ExpectSize)
 	}
 
@@ -239,17 +269,17 @@ func (s *Service) ConfirmUpload(ctx context.Context, photoID string) (*PhotoDTO,
 	raw, err := imgproc.ReadAllLimit(rc, s.maxUploadBytes())
 	rc.Close()
 	if err != nil {
-		s.abortSession(ctx, sess, photoID, "对象读取失败")
+		s.abortSession(ctx, sess, photoID, failReadBack)
 		return nil, fmt.Errorf("%w: read back: %v", ErrStorage, err)
 	}
 	// 服务端回读复检魔数：presign 的 Content-Type 锁不住真实内容
 	if len(raw) < 12 {
-		s.abortSession(ctx, sess, photoID, "文件不是有效图片")
+		s.abortSession(ctx, sess, photoID, failNotAnImage)
 		return nil, ErrUnsupportedMedia
 	}
 	ext, err := imgproc.SniffFormat(raw[:12])
 	if err != nil {
-		s.abortSession(ctx, sess, photoID, "文件不是有效图片")
+		s.abortSession(ctx, sess, photoID, failNotAnImage)
 		return nil, ErrUnsupportedMedia
 	}
 
@@ -375,7 +405,7 @@ func failReason(err error) string {
 	case errors.Is(err, imgproc.ErrTooManyPixels):
 		return "pixel bomb"
 	case errors.Is(err, imgproc.ErrUnsupported):
-		return "文件不是有效图片"
+		return failNotAnImage
 	case errors.Is(err, imgproc.ErrCorrupt):
 		return "图片已损坏或被截断"
 	default:

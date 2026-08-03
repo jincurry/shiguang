@@ -284,10 +284,18 @@ gofmt 检查、`go vet`、`go build`、`go test -race`，外加两个针对本�
 ```bash
 go build ./... && go vet ./... && go test ./...
 
-# s3 契约测试需要 MinIO：
-docker run -d -p 9000:9000 minio/minio server /data
-SG_TEST_S3_ENDPOINT=http://localhost:9000 SG_TEST_S3_BUCKET=shiguang-test go test ./internal/blob/
+# s3 契约测试默认 skip，检测到 SG_TEST_S3_ENDPOINT 才连 MinIO 执行：
+docker run -d -p 9000:9000 minio/minio server /data     # 或直接下载 minio 二进制
+SG_TEST_S3_ENDPOINT=http://localhost:9000 \
+SG_TEST_S3_BUCKET=shiguang-test \
+SG_TEST_S3_AK=minioadmin SG_TEST_S3_SK=minioadmin \
+  go test ./internal/blob/ -run S3
 ```
+
+**s3 模式已实机验证**（MinIO，path-style）：契约测试全通过；presign 直传
+→ confirm → Rename 转正 → staging 清空；变体走 presign GET URL（去掉签名
+返回 403）；秒传重跑不产生重复对象；confirm 回读复检能挡住伪装成 jpg 的
+文本文件并删除坏对象；浏览器直传 PUT 到对象存储返回 200，照片不经应用服务器。
 
 覆盖：EXIF 8 方向矫正、灰度 png、截断文件、60MP 伪造头、blob 契约
 （fake/local/s3 同套件 + 防穿越）、上传→ready 全流程、409 秒传、跨节点共享
