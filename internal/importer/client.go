@@ -266,31 +266,56 @@ func (c *Client) ConfirmUpload(ctx context.Context, photoID string) (*PhotoDTO, 
 	return &p, nil
 }
 
-// withRetry 对 429 与 5xx / 网络错误做指数退避重试；4xx（除 429）立即返回。
+// MaxBackpressureWait 是单张照片因限流累计等待的上限。
+//
+// 429 是服务端带 Retry-After 的协作式背压，不是失败：把它计入错误重试预算，
+// 会让批量导入在服务端说「慢一点」时直接丢照片。照片是不可再生资产，
+// 所以限流只按 Retry-After 等待、不消耗错误预算，仅用总时长兜底防止无限挂起。
+const MaxBackpressureWait = 10 * time.Minute
+
+// defaultBackpressureWait 是服务端未给出 Retry-After 时的等待时长。
+// 作为变量是为了测试能把它调小，生产路径不修改。
+var defaultBackpressureWait = time.Second
+
+// withRetry 重试策略：
+//   - 429：按 Retry-After 等待后重试，不计入 attempts，累计等待超过
+//     MaxBackpressureWait 才放弃；
+//   - 5xx / 网络错误：指数退避，最多 attempts 次；
+//   - 其余 4xx：确定性失败，立即返回（重试无意义）。
 func withRetry(ctx context.Context, attempts int, fn func() error) error {
 	var last error
-	for i := 0; i < attempts; i++ {
+	var waited time.Duration
+	for errCount := 0; ; {
 		last = fn()
 		if last == nil {
 			return nil
 		}
 		var apiErr *APIError
 		if errors.As(last, &apiErr) {
-			retryable := apiErr.Status == http.StatusTooManyRequests || apiErr.Status >= 500
-			if !retryable {
-				return last
-			}
-			if apiErr.RetryAfter > 0 {
-				if err := sleepCtx(ctx, time.Duration(apiErr.RetryAfter)*time.Second); err != nil {
+			if apiErr.Status == http.StatusTooManyRequests {
+				d := time.Duration(apiErr.RetryAfter) * time.Second
+				if d <= 0 {
+					d = defaultBackpressureWait
+				}
+				d += time.Duration(rand.Int63n(int64(d/2 + 1)))
+				if waited+d > MaxBackpressureWait {
+					return last
+				}
+				waited += d
+				if err := sleepCtx(ctx, d); err != nil {
 					return err
 				}
-				continue
+				continue // 背压不消耗错误预算
+			}
+			if apiErr.Status < 500 {
+				return last
 			}
 		}
-		if i == attempts-1 {
-			break
+		errCount++
+		if errCount >= attempts {
+			return last
 		}
-		backoff := time.Duration(1<<uint(i)) * time.Second
+		backoff := time.Duration(1<<uint(errCount-1)) * time.Second
 		if backoff > 30*time.Second {
 			backoff = 30 * time.Second
 		}
@@ -299,7 +324,6 @@ func withRetry(ctx context.Context, attempts int, fn func() error) error {
 			return err
 		}
 	}
-	return last
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

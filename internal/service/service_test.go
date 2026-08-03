@@ -292,7 +292,7 @@ func TestCursorPagination(t *testing.T) {
 	cursor := ""
 	pages := 0
 	for {
-		out, err := svc.Timeline(ctx, cursor, 10)
+		out, err := svc.Timeline(ctx, cursor, 10, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -448,4 +448,69 @@ func shaOf(b []byte) string {
 
 func sha256Sum(b []byte) [32]byte {
 	return sha256.Sum256(b)
+}
+
+// TestConfirmFailedIsIdempotent 对同一张已失败的照片重复 confirm，必须每次
+// 都返回与首次相同的错误。回归：曾经第二次会变成「会话已过期，请重新上传」，
+// 而真实原因是文件不是有效图片——把人往错误方向引。
+func TestConfirmFailedIsIdempotent(t *testing.T) {
+	svc, fake := newTestService(t, Config{BlobDriver: "s3"})
+	ctx := context.Background()
+	n := mkNode(t, svc, "2026-09-09", "N")
+
+	cases := []struct {
+		reason string
+		check  func(error) bool
+		name   string
+	}{
+		{failNotAnImage, func(e error) bool { return errors.Is(e, ErrUnsupportedMedia) }, "非图片"},
+		{failUploadIncomplete, func(e error) bool { return errors.Is(e, ErrSessionExpired) }, "上传未完成"},
+		{failSizeMismatch, func(e error) bool {
+			var ve *ValidationError
+			return errors.As(e, &ve)
+		}, "大小不符"},
+		{failReadBack, func(e error) bool { return errors.Is(e, ErrStorage) }, "回读失败"},
+	}
+
+	for _, c := range cases {
+		now := store.Now()
+		photoID := NewULID()
+		ext := "jpg"
+		if err := svc.Store().CreatePhoto(ctx, &store.Photo{
+			ID: photoID, NodeID: n.ID, Ord: 100, Status: "pending", Ext: &ext,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// 会话已被终结（aborted），照片记着失败原因
+		sessID := NewULID()
+		objKey := blob.StagingKey(sessID, ext)
+		fake.Put(ctx, objKey, bytes.NewReader([]byte("x")), 1, "image/jpeg")
+		if err := svc.Store().CreateSession(ctx, &store.UploadSession{
+			ID: sessID, PhotoID: photoID, ObjectKey: objKey, ExpectSize: 1,
+			ContentType: "image/jpeg", State: "issued",
+			ExpiresAt: store.FormatTime(time.Now().Add(time.Hour)), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		svc.Store().SetSessionState(ctx, sessID, "aborted")
+		svc.Store().MarkPhotoFailed(ctx, photoID, c.reason, store.Now())
+
+		// 连续三次 confirm 必须给出同一个错误
+		var first error
+		for i := 0; i < 3; i++ {
+			_, err := svc.ConfirmUpload(ctx, photoID)
+			if err == nil {
+				t.Fatalf("%s: confirm #%d should fail", c.name, i+1)
+			}
+			if !c.check(err) {
+				t.Errorf("%s: confirm #%d wrong error type: %v", c.name, i+1, err)
+			}
+			if i == 0 {
+				first = err
+			} else if err.Error() != first.Error() {
+				t.Errorf("%s: confirm #%d differs from first: %v vs %v", c.name, i+1, err, first)
+			}
+		}
+	}
 }

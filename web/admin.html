@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>拾光集 · 暗房工作台</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500&display=swap');
+  /* 不加载网络字体：CSS @import 是渲染阻塞的，fonts.googleapis.com 在部分
+     网络环境不可达时会让整页白屏干等十几秒。下面的字体栈已覆盖
+     macOS(PingFang/Songti)、Windows(微软雅黑/宋体)、iOS、Android 中文系统。 */
   :root{
     --bg:#161310; --bg-soft:#1D1915; --panel:#1A1613;
     --ivory:#EDE5D8; --muted:#9A8E7E; --faint:#5E564A;
@@ -159,6 +161,24 @@
   }
   .side-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
   .side-head h2{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.24em;}
+  /* 节点搜索 */
+  .side-search{position:relative;margin-bottom:12px;}
+  .side-search input{
+    width:100%;font-size:13px;padding:8px 30px 8px 30px;border-radius:9px;
+  }
+  .side-search .ic{
+    position:absolute;left:10px;top:50%;transform:translateY(-50%);
+    font-size:12px;color:var(--faint);pointer-events:none;
+  }
+  .side-search .clr{
+    position:absolute;right:6px;top:50%;transform:translateY(-50%);
+    width:20px;height:20px;border-radius:5px;display:none;place-items:center;
+    color:var(--faint);font-size:13px;
+  }
+  .side-search .clr:hover{color:var(--ivory);}
+  .side-search.has .clr{display:grid;}
+  .side-hit{font-family:var(--mono);font-size:10.5px;color:var(--faint);
+    letter-spacing:.1em;margin:0 4px 8px;}
   .nodes{display:flex;flex-direction:column;gap:6px;}
   .n-item{
     text-align:left;width:100%;padding:12px 14px;border-radius:10px;
@@ -259,6 +279,45 @@
     display:grid;place-items:center;
   }
   .ops button:hover{background:var(--safelight);}
+  /* 多选：勾选框压在画面左下角，避开左上的封面星标与右上的操作按钮 */
+  .card .pick-box{
+    position:absolute;left:10px;bottom:48px;z-index:3;
+    width:22px;height:22px;border-radius:6px;
+    display:grid;place-items:center;
+    background:rgba(22,19,16,.66);border:1.5px solid rgba(237,229,216,.5);
+    color:transparent;font-size:13px;line-height:1;
+    opacity:0;transition:opacity .2s,background .2s,border-color .2s;
+  }
+  .card:hover .pick-box,.card:focus-within .pick-box{opacity:1;}
+  body.picking .card .pick-box{opacity:1;}      /* 已有选中时全部常显 */
+  .card.picked .pick-box{
+    opacity:1;background:var(--amber);border-color:var(--amber);color:#241B0E;
+  }
+  .card.picked{outline:2px solid var(--amber);outline-offset:2px;}
+  .card.picked .ph{filter:brightness(.82);}
+  @media (max-width:760px){ .card .pick-box{opacity:1;} }
+
+  /* 批量操作工具条 */
+  #bulkbar{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:94;
+    display:none;align-items:center;gap:14px;
+    background:rgba(29,25,21,.97);border:1px solid var(--line);
+    padding:10px 16px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+    animation:tIn .25s ease;max-width:calc(100vw - 32px);flex-wrap:wrap;
+  }
+  #bulkbar.on{display:flex;}
+  #bulkbar .n{font-family:var(--mono);font-size:12px;color:var(--ivory);
+    letter-spacing:.06em;white-space:nowrap;}
+  #bulkbar .n b{color:var(--amber);font-weight:400;}
+  #bulkbar button{
+    font-size:12.5px;padding:6px 12px;border-radius:7px;
+    border:1px solid var(--line);color:var(--muted);white-space:nowrap;
+    transition:color .2s,border-color .2s,background .2s;
+  }
+  #bulkbar button:hover{color:var(--amber);border-color:var(--amber);}
+  #bulkbar button.danger:hover{color:#fff;background:var(--safelight);border-color:var(--safelight);}
+  body.light #bulkbar{background:rgba(255,253,246,.98);box-shadow:0 8px 24px rgba(90,75,55,.25);}
+
   /* 拖拽把手（木夹） */
   .handle{
     position:absolute;top:-11px;left:50%;transform:translateX(-50%);z-index:3;
@@ -426,6 +485,13 @@
         <h2>时间轴节点</h2>
         <button class="btn" id="newNode" style="padding:6px 12px;font-size:13px">＋ 新建</button>
       </div>
+      <div class="side-search" id="sideSearch">
+        <span class="ic" aria-hidden="true">🔍</span>
+        <input type="search" id="nodeSearch" placeholder="搜标题或日期…"
+               autocomplete="off" aria-label="搜索节点">
+        <button class="clr" id="nodeSearchClr" aria-label="清除搜索">✕</button>
+      </div>
+      <div class="side-hit" id="sideHit" hidden></div>
       <div class="nodes" id="nodeList"></div>
     </aside>
 
@@ -466,6 +532,13 @@
   </div>
 </div>
 <div id="toasts"></div>
+<div id="bulkbar">
+  <span class="n">已选 <b id="bulkN">0</b> 张</span>
+  <button id="bulkAll">全选</button>
+  <button id="bulkNone">取消选择</button>
+  <button id="bulkMove">⇄ 移到其他节点</button>
+  <button class="danger" id="bulkDel">✕ 批量删除</button>
+</div>
 <div id="batchbar" hidden>
   <div class="row"><span id="batchText"></span><em id="batchSub"></em></div>
   <i class="bar"><b id="batchFill"></b></i>
@@ -531,22 +604,41 @@ function mapPhoto(p){
 }
 function mapNode(n){
   return {id: n.id, date: n.date, title: n.title, desc: n.description,
-          photos: (n.photos || []).map(mapPhoto)};
+          photo_count: n.photo_count || 0,
+          photos: (n.photos || []).map(mapPhoto),
+          _loaded: Array.isArray(n.photos)};
 }
 
-/* 管理端取全量：大 limit 循环翻页 */
+/* 管理端只拉节点元数据（include_photos=false）：登录时不把整库照片带下来。
+   某个节点的照片等选中它时再按需取。 */
 async function loadAll(){
   const nodes = [];
   let cursor = null;
   do{
-    const q = cursor ? `/timeline?limit=50&cursor=${encodeURIComponent(cursor)}` : '/timeline?limit=50';
+    const q = '/timeline?limit=50&include_photos=false'
+      + (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const d = await api(q);
-    d.items.forEach(n => nodes.push(mapNode(n)));
+    d.items.forEach(n => {
+      const mapped = mapNode(n);
+      mapped._loaded = false;            // 只有元数据，照片还没取
+      mapped.photos = [];
+      nodes.push(mapped);
+    });
     cursor = d.next_cursor;
   }while(cursor);
   state.nodes = nodes;
   state.trash = (await api('/trash')).items;
-  nodes.forEach(n => n.photos.forEach(p => watch(p, n)));
+}
+
+/* 按需取某个节点的照片；已取过则直接返回 */
+async function ensurePhotos(n){
+  if(!n || n._loaded) return n;
+  const d = await api(`/nodes/${n.id}`);
+  n.photos = (d.photos || []).map(mapPhoto);
+  n.photo_count = d.photo_count;
+  n._loaded = true;
+  n.photos.forEach(p => watch(p, n));     /* 仍在显影的接着轮询 */
+  return n;
 }
 
 /* ================= 工具 ================= */
@@ -588,7 +680,7 @@ function pickNode(excludeId, hint){
         <button class="pick" data-id="${esc(n.id)}">
           <span class="d">${esc(n.date)}</span>
           <span class="t">${esc(n.title)}</span>
-          <span class="c">×${n.photos.length}</span>
+          <span class="c">×${n.photo_count}</span>
         </button>`).join('');
     }
     $('#pickModal').classList.add('on');
@@ -674,7 +766,7 @@ if(token()){ enterApp().catch(() => sessionStorage.removeItem('sg_token')); }
 /* ================= 渲染 ================= */
 function renderAll(){ renderList(); renderDetail(); renderStats(); renderTrashBadge(); }
 function renderStats(){
-  const p = state.nodes.reduce((a, n) => a + n.photos.length, 0);
+  const p = state.nodes.reduce((a, n) => a + (n.photo_count || 0), 0);
   const el = $('#stats');
   el.textContent = '';
   const b1 = document.createElement('b'); b1.textContent = state.nodes.length;
@@ -686,22 +778,55 @@ function renderTrashBadge(){
   el.hidden = !state.trash.length;
   el.textContent = state.trash.length;
 }
+/* 节点搜索：标题或日期任一命中即可；空格分隔的多个词需全部命中 */
+let nodeQuery = '';
+function matchNode(n, terms){
+  if(!terms.length) return true;
+  const hay = (n.title + ' ' + n.date).toLowerCase();
+  return terms.every(t => hay.includes(t));
+}
+
 function renderList(){
-  const sorted = [...state.nodes].sort((a, b) => b.date.localeCompare(a.date));
+  const terms = nodeQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const sorted = [...state.nodes]
+    .filter(n => matchNode(n, terms))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const hit = $('#sideHit');
+  if(terms.length){
+    hit.hidden = false;
+    hit.textContent = `${sorted.length} / ${state.nodes.length} 个节点`;
+  }else{
+    hit.hidden = true;
+  }
+  $('#sideSearch').classList.toggle('has', nodeQuery !== '');
+
   let html = '', year = '';
   sorted.forEach(n => {
     const y = n.date.slice(0, 4);
     if(y !== year){ year = y; html += `<div class="yearsep">${esc(y)}</div>`; }
     html += `<button class="n-item ${n.id === state.sel ? 'sel' : ''}" data-id="${esc(n.id)}">
       <span class="d">${esc(n.date)}</span>
-      <span class="t">${esc(n.title)}<span class="c">×${n.photos.length}</span></span>
+      <span class="t">${esc(n.title)}<span class="c">×${n.photo_count}</span></span>
     </button>`;
   });
-  $('#nodeList').innerHTML = html || '<div class="t-empty">还没有节点</div>';
+  $('#nodeList').innerHTML = html ||
+    (terms.length ? '<div class="t-empty">没有匹配的节点</div>'
+                  : '<div class="t-empty">还没有节点</div>');
 }
+
+$('#nodeSearch').addEventListener('input', e => {
+  nodeQuery = e.target.value;
+  renderList();
+});
+$('#nodeSearchClr').addEventListener('click', () => {
+  nodeQuery = ''; $('#nodeSearch').value = ''; renderList(); $('#nodeSearch').focus();
+});
 $('#nodeList').addEventListener('click', e => {
   const b = e.target.closest('.n-item'); if(!b) return;
-  state.sel = b.dataset.id; renderList(); renderDetail();
+  state.sel = b.dataset.id;
+  clearSel();                                       /* 换节点即清空选择 */
+  renderList(); renderDetail();
   $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
 });
 
@@ -737,10 +862,24 @@ function renderDetail(){
     </div>
 
     <div class="sect">
-      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点</h3>
+      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点 / ✓ 多选</h3>
       <div class="grid" id="grid"></div>
+      <div class="d-empty" id="gridLoading" hidden>正在取出相纸……</div>
     </div>`;
-  renderGrid(n);
+  if(n._loaded){
+    renderGrid(n);
+  }else{
+    /* 照片按需加载：先把外壳渲染出来，拿到再补上网格 */
+    $('#gridLoading').hidden = false;
+    ensurePhotos(n).then(() => {
+      if(state.sel !== n.id) return;          // 用户已经切走了
+      $('#gridLoading')?.setAttribute('hidden', '');
+      renderGrid(n); renderList(); renderStats();
+    }).catch(err => {
+      $('#gridLoading')?.setAttribute('hidden', '');
+      toast(errMsg(err, '照片加载失败'), 'err');
+    });
+  }
 
   $('#backList').onclick = () => $('#mainView').classList.remove('showDetail');
   $('#saveNode').onclick = async () => {
@@ -759,7 +898,7 @@ function renderDetail(){
   };
   $('#delNode').onclick = async () => {
     if(await confirmBox('移入回收站？',
-        `节点「${n.title}」及其 ${n.photos.length} 张照片将进入回收站，7 天内可恢复。`)){
+        `节点「${n.title}」及其 ${n.photo_count} 张照片将进入回收站，7 天内可恢复。`)){
       try{
         await api(`/nodes/${n.id}`, {method: 'DELETE'});
         state.nodes = state.nodes.filter(x => x.id !== n.id);
@@ -809,6 +948,30 @@ async function filesFromDrop(dt){
   return out;
 }
 
+/* ================= 多选 ================= */
+const sel = new Set();          // 选中的 photo id
+let lastPickIndex = -1;         // Shift 连选的锚点
+
+function clearSel(){
+  sel.clear(); lastPickIndex = -1; syncSel();
+}
+/* 只改 class 不重建 DOM——重建会打断 hover 与滚动位置 */
+function syncSel(){
+  document.querySelectorAll('#grid .card').forEach(card => {
+    card.classList.toggle('picked', sel.has(card.dataset.id));
+  });
+  document.body.classList.toggle('picking', sel.size > 0);
+  $('#bulkbar').classList.toggle('on', sel.size > 0);
+  $('#bulkN').textContent = sel.size;
+}
+/* 切换节点或列表变动后，丢掉已不存在的选中项 */
+function pruneSel(){
+  const n = node(state.sel);
+  const alive = new Set(n ? n.photos.map(p => p.id) : []);
+  for(const id of [...sel]) if(!alive.has(id)) sel.delete(id);
+  syncSel();
+}
+
 function renderGrid(n){
   const g = $('#grid');
   g.innerHTML = n.photos.map((p, i) => `
@@ -816,6 +979,8 @@ function renderGrid(n){
             data-id="${esc(p.id)}">
       <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
       <span class="star">★ 封面</span>
+      <button class="pick-box" data-op="pick" title="选中（按住 Shift 可连选）"
+              aria-label="选中这张">✓</button>
       <div class="ops">
         <button data-op="cap" title="改图注">✎</button>
         <button data-op="cover" title="设为封面">★</button>
@@ -831,6 +996,7 @@ function renderGrid(n){
       <figcaption class="cap"><i>No.${String(i + 1).padStart(2, '0')}</i><b>${esc(p.cap)}</b></figcaption>
     </figure>`).join('');
   bindCards(n);
+  pruneSel();          /* 重建 DOM 后回填选中态，并丢掉已不存在的项 */
 }
 
 /* ================= 上传（local: multipart / s3: presign→PUT→confirm） =================
@@ -887,6 +1053,7 @@ function ingest(n, files){
     n.photos.push(p);
     return {n, f, p};
   });
+  n.photo_count = n.photos.length;
   renderGrid(n); renderList(); renderStats();
   enqueue(items);
 }
@@ -975,6 +1142,7 @@ async function uploadOne(n, f, p){
       n.photos = n.photos.filter(x => x.id !== p.id);
       const exist = mapPhoto(err.data.photo);
       if(!n.photos.some(x => x.id === exist.id)) n.photos.push(exist);
+      n.photo_count = n.photos.length;
       if(batch.total <= 1) toast('已存在相同照片', 'ok');
       scheduleGrid(n);
       return 'dup';
@@ -1047,9 +1215,24 @@ function bindCards(n){
     const p = n.photos.find(x => x.id === card.dataset.id);
     if(!p) return;
     const op = btn.dataset.op;
+    if(op === 'pick'){
+      const cards = [...g.querySelectorAll('.card')];
+      const idx = cards.indexOf(card);
+      if(e.shiftKey && lastPickIndex >= 0){
+        /* Shift 连选：从锚点到当前全部选上 */
+        const [a, b] = idx < lastPickIndex ? [idx, lastPickIndex] : [lastPickIndex, idx];
+        for(let i = a; i <= b; i++) sel.add(cards[i].dataset.id);
+      }else{
+        sel.has(p.id) ? sel.delete(p.id) : sel.add(p.id);
+        lastPickIndex = idx;
+      }
+      syncSel();
+      return;
+    }
     if(op === 'del'){
       if(String(p.id).startsWith('tmp-')){
         n.photos = n.photos.filter(x => x.id !== p.id);
+        n.photo_count = n.photos.length;
         renderGrid(n); renderList(); renderStats();
         return;
       }
@@ -1057,6 +1240,7 @@ function bindCards(n){
         try{
           await api(`/photos/${p.id}`, {method: 'DELETE'});
           n.photos = n.photos.filter(x => x.id !== p.id);
+          n.photo_count = n.photos.length;
           state.trash = (await api('/trash')).items;
           renderGrid(n); renderList(); renderStats(); renderTrashBadge();
           toast('已移入回收站', 'ok');
@@ -1074,8 +1258,12 @@ function bindCards(n){
       try{
         await api(`/photos/${p.id}`, {method: 'PATCH', body: {node_id: target}});
         n.photos = n.photos.filter(x => x.id !== p.id);
+        n.photo_count = n.photos.length;
         const tn = node(target);
-        if(tn) tn.photos.push(p);          /* 服务端把它挂到目标节点末尾 */
+        if(tn){
+          if(tn._loaded) tn.photos.push(p);   /* 服务端把它挂到目标节点末尾 */
+          tn.photo_count = (tn.photo_count || 0) + 1;
+        }
         renderGrid(n); renderList(); renderStats();
         toast(`已移到「${tn ? tn.title : '目标节点'}」`, 'ok');
       }catch(err){
@@ -1159,12 +1347,81 @@ function bindCards(n){
   });
 }
 
+/* ================= 批量操作工具条 ================= */
+$('#bulkAll').addEventListener('click', () => {
+  const n = node(state.sel); if(!n) return;
+  n.photos.forEach(p => { if(!String(p.id).startsWith('tmp-')) sel.add(p.id); });
+  syncSel();
+});
+$('#bulkNone').addEventListener('click', clearSel);
+
+/* 逐条汇报结果：批量移动时个别照片因目标已有同图而冲突是常态，
+   不该因此让整批失败，也不该含糊地只说"部分失败" */
+function reportBatch(res, verb){
+  if(res.failed && res.failed.length){
+    const why = res.failed[0].reason || '未知原因';
+    toast(`${verb} ${res.succeeded} 张，${res.failed.length} 张未处理：${why}`, 'err');
+  }else{
+    toast(`已${verb} ${res.succeeded} 张`, 'ok');
+  }
+}
+
+$('#bulkMove').addEventListener('click', async () => {
+  const n = node(state.sel); if(!n || !sel.size) return;
+  const ids = [...sel];
+  const target = await pickNode(n.id, `把选中的 ${ids.length} 张移到：`);
+  if(!target) return;
+  try{
+    const res = await api('/photos/batch', {method: 'POST',
+      body: {action: 'move', photo_ids: ids, node_id: target}});
+    const moved = new Set(ids.filter(id => !(res.failed || []).some(f => f.id === id)));
+    n.photos = n.photos.filter(p => !moved.has(p.id));
+    const tn = node(target);
+    if(tn){
+      /* 目标节点的照片下次选中时按需重取，这里只失效缓存并更新计数 */
+      tn._loaded = false; tn.photos = [];
+      tn.photo_count = (tn.photo_count || 0) + moved.size;
+    }
+    n.photo_count = n.photos.length;
+    clearSel(); renderGrid(n); renderList(); renderStats();
+    reportBatch(res, '移动');
+  }catch(err){
+    toast(errMsg(err, '批量移动失败'), 'err');
+  }
+});
+
+$('#bulkDel').addEventListener('click', async () => {
+  const n = node(state.sel); if(!n || !sel.size) return;
+  const ids = [...sel];
+  if(!await confirmBox(`删除选中的 ${ids.length} 张？`,
+      '将进入回收站，7 天内可恢复。')) return;
+  try{
+    const res = await api('/photos/batch', {method: 'POST',
+      body: {action: 'delete', photo_ids: ids}});
+    const gone = new Set(ids.filter(id => !(res.failed || []).some(f => f.id === id)));
+    n.photos = n.photos.filter(p => !gone.has(p.id));
+    n.photo_count = n.photos.length;
+    state.trash = (await api('/trash')).items;
+    clearSel(); renderGrid(n); renderList(); renderStats(); renderTrashBadge();
+    reportBatch(res, '删除');
+  }catch(err){
+    toast(errMsg(err, '批量删除失败'), 'err');
+  }
+});
+
+/* Esc 取消选择 */
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && sel.size && !$('#modal').classList.contains('on')
+     && !$('#pickModal').classList.contains('on')) clearSel();
+});
+
 /* ================= 新建节点 ================= */
 $('#newNode').addEventListener('click', async () => {
   try{
     const d = await api('/nodes', {method: 'POST',
       body: {date: new Date().toISOString().slice(0, 10), title: '未命名节点', description: ''}});
     const n = mapNode(d);
+    n._loaded = true;                     /* 新节点必然是空的，不必再请求 */
     state.nodes.unshift(n); state.sel = n.id;
     renderAll(); $('#mainView').classList.add('showDetail');
     setTimeout(() => { $('#fTitle')?.focus(); $('#fTitle')?.select(); }, 50);
@@ -1211,6 +1468,7 @@ function renderTrash(){
                 {method: 'POST'});
       await loadAll();
       if(!node(state.sel)) state.sel = state.nodes[0]?.id || null;
+      clearSel();
       renderAll(); renderTrash();
       toast('已恢复', 'ok');
     }catch(err){

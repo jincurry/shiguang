@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支上新的推送取消仍在跑的旧任务，省 CI 时间
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未格式化，请运行 gofmt -w ："
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -race ./...
+
+      # 前端是零构建的原生 HTML，用 node 做个语法体检，
+      # 防止把语法错误的 JS 打进二进制（embed 不会校验内容）
+      - name: check embedded JS syntax
+        run: |
+          for f in web/index.html web/admin.html; do
+            sed -n '/^<script>$/,/^<\/script>$/p' "$f" | sed '1d;$d' > /tmp/check.js
+            node --check /tmp/check.js || { echo "$f 内嵌 JS 语法错误"; exit 1; }
+            echo "$f OK"
+          done
+
+  # 交叉编译验证：sgctl 要发给各平台用户，编译不过要在 CI 就发现
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: cross compile sgctl
+        run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sgctl-binaries
+          path: dist/
+          retention-days: 14

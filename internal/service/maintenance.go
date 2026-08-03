@@ -42,7 +42,7 @@ func (s *Service) Reap(ctx context.Context) (int, error) {
 		if err != nil || !ok {
 			continue // 竞争中被 confirm 走了，跳过
 		}
-		if err := s.st.MarkPhotoFailed(ctx, sess.PhotoID, "上传未完成", store.Now()); err != nil {
+		if err := s.st.MarkPhotoFailed(ctx, sess.PhotoID, failUploadIncomplete, store.Now()); err != nil {
 			s.log.Error("reap: mark failed", "photo", sess.PhotoID, "err", err)
 		}
 		if err := s.bl.Delete(ctx, sess.ObjectKey); err != nil {
@@ -189,7 +189,9 @@ func (s *Service) reconcileOrphans(ctx context.Context) error {
 			return nil
 		}
 		// local 驱动有 mtime，直接判龄；其他驱动两阶段标记
-		if lm, ok := s.bl.(interface{ MTime(string) (time.Time, error) }); ok {
+		if lm, ok := s.bl.(interface {
+			MTime(string) (time.Time, error)
+		}); ok {
 			if mt, err := lm.MTime(key); err == nil {
 				if now.Sub(mt) > orphanAge {
 					if err := s.bl.Delete(ctx, key); err == nil {
