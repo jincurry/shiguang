@@ -114,6 +114,31 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+func TestFavicon(t *testing.T) {
+	st, err := store.Open("file:"+t.TempDir()+"/test.db", migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := service.New(service.Config{PublicRead: true}, st, blob.NewFake(), log)
+	srv := New(svc, log, Options{FaviconSVG: []byte("<svg></svg>")})
+
+	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("content type: got %q", got)
+	}
+	if got := rec.Body.String(); got != "<svg></svg>" {
+		t.Fatalf("body: got %q", got)
+	}
+}
+
 func TestUploadRateLimit429(t *testing.T) {
 	// 显式配置 10 次/分钟（burst 10）：第 11 次必须 429 + Retry-After
 	ts := newTestServerRPM(t, 30, 10)

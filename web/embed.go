@@ -3,6 +3,9 @@ package web
 
 import _ "embed"
 
+//go:embed favicon.svg
+var FaviconSVG []byte
+
 //go:embed index.html
 var IndexHTML []byte
 

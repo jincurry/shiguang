@@ -26,6 +26,7 @@ type Server struct {
 	localBlob  *blob.Local // 非 nil 表示 local 模式，/img 走文件直出
 	index      []byte
 	admin      []byte
+	favicon    []byte
 	globalRPS  float64
 	uploadRPM  float64
 }
@@ -38,6 +39,7 @@ type Options struct {
 	LocalBlob  *blob.Local // local 模式传入，s3 模式为 nil
 	IndexHTML  []byte
 	AdminHTML  []byte
+	FaviconSVG []byte
 	// GlobalRPS 全局令牌桶速率（每秒），0 用默认 50。
 	GlobalRPS float64
 	// UploadRPM 上传端点速率（每分钟），0 用默认 600。
@@ -64,6 +66,7 @@ func New(svc *service.Service, log *slog.Logger, opt Options) *Server {
 		localBlob:  opt.LocalBlob,
 		index:      opt.IndexHTML,
 		admin:      opt.AdminHTML,
+		favicon:    opt.FaviconSVG,
 		globalRPS:  opt.GlobalRPS,
 		uploadRPM:  opt.UploadRPM,
 	}
@@ -78,6 +81,11 @@ func (s *Server) Handler() http.Handler {
 	// 套用 API 的 50 rps 会让相册限流自己的图片——浏览器收到 429 后
 	// onerror 触发，好照片上会盖出"曝光失败"章。这些是 immutable 缓存资源，
 	// 真要控带宽应放在反向代理/CDN 层，而不是靠 API 预算。
+	r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(s.favicon)
+	})
 	if s.localBlob != nil {
 		imgLimit := rateLimit(newBucket(500, 1000))
 		r.Group(func(g chi.Router) {

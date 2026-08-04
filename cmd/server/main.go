@@ -83,6 +83,7 @@ func main() {
 		LocalBlob:  localBlob,
 		IndexHTML:  web.IndexHTML,
 		AdminHTML:  web.AdminHTML,
+		FaviconSVG: web.FaviconSVG,
 		GlobalRPS:  float64(cfg.GlobalRPS),
 		UploadRPM:  float64(cfg.UploadRPM),
 	})
