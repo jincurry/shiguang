@@ -51,6 +51,8 @@
   /* 亮色下的深色硬编码组件覆盖 */
   body.light .topbar{background:rgba(239,234,224,.88);}
   body.light .btn{color:#FBF6EA;}
+  body.light .btn.danger{background:rgba(194,74,50,.12);color:#A93A24;border-color:rgba(194,74,50,.5);}
+  body.light .btn.danger:hover{background:var(--safelight);color:#fff;border-color:var(--safelight);}
   body.light .ops button{background:rgba(255,253,246,.9);color:var(--ivory);
     box-shadow:0 1px 4px rgba(90,75,55,.25);}
   body.light .ops button:hover{background:var(--safelight);color:#fff;}
@@ -122,12 +124,16 @@
   .btn:hover{filter:brightness(1.08);} .btn:active{transform:translateY(1px);}
   .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);}
   .btn.ghost:hover{color:var(--ivory);border-color:var(--muted);}
-  .btn.danger{background:transparent;color:var(--safelight);border:1px solid rgba(212,85,59,.4);}
-  .btn.danger:hover{background:rgba(212,85,59,.12);}
+  .btn.danger{background:rgba(212,85,59,.18);color:#F2937B;border:1px solid rgba(212,85,59,.65);}
+  .btn.danger:hover{background:var(--safelight);color:#fff;border-color:var(--safelight);filter:none;}
   .door .hint{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;}
 
-  /* ============ 工作台框架 ============ */
+  /* ============ 工作台框架 ============
+     整个工作台锁定为一屏高（100dvh），顶栏之下由左右两栏各自滚动：
+     左栏节点列表再长也不推着右栏跑，选完底部节点不用再拉回顶部看照片。 */
   #app{min-height:100vh;}
+  #app.on{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
+  #trashView{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
   .topbar{
     position:sticky;top:0;z-index:40;
     display:flex;align-items:center;gap:18px;
@@ -154,13 +160,33 @@
     border-radius:8px;padding:0 6px;line-height:16px;
   }
 
-  .layout{display:grid;grid-template-columns:300px 1fr;gap:0;max-width:1240px;margin:0 auto;}
+  .layout{
+    display:grid;grid-template-columns:300px 1fr;gap:0;
+    width:100%;max-width:1240px;margin:0 auto;
+    flex:1;min-height:0;               /* 占满顶栏以下的剩余高度，滚动交给两栏自己 */
+  }
+  .side,.detail{
+    overflow-y:auto;overscroll-behavior:contain;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+  }
+  .side::-webkit-scrollbar,.detail::-webkit-scrollbar{width:8px;}
+  .side::-webkit-scrollbar-thumb,.detail::-webkit-scrollbar-thumb{
+    background:var(--line);border-radius:4px;}
+  .side::-webkit-scrollbar-track,.detail::-webkit-scrollbar-track{background:transparent;}
 
   /* ---------- 左栏：节点列表 ---------- */
   .side{
-    border-right:1px solid var(--hairline);min-height:calc(100vh - 57px);
-    padding:20px 16px 40px;
+    border-right:1px solid var(--hairline);
+    padding:0 16px 40px;
   }
+  /* 列表头 + 搜索粘在左栏顶部：长列表滚到底也随手能搜、能新建 */
+  .side-top{
+    position:sticky;top:0;z-index:5;
+    margin:0 -16px;padding:18px 16px 8px;
+    background:var(--bg);               /* 不透明：列表滚过时不透字 */
+    box-shadow:0 6px 12px -8px rgba(0,0,0,.35);
+  }
+  body.light .side-top{box-shadow:0 6px 12px -8px rgba(90,75,55,.25);}
   .side-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
   .side-head h2{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.24em;}
   /* 节点搜索 */
@@ -206,7 +232,11 @@
   .d-empty{color:var(--faint);font-family:var(--mono);font-size:12px;letter-spacing:.15em;
     padding:80px 0;text-align:center;}
   .backbtn{display:none;margin-bottom:14px;}
-  .d-form{display:grid;grid-template-columns:150px 1fr;gap:12px;max-width:640px;}
+  .d-form{
+    display:grid;grid-template-columns:150px 1fr;gap:12px;max-width:640px;
+    background:var(--panel);border:1px solid var(--hairline);border-radius:12px;
+    padding:18px;
+  }
   .d-form textarea{grid-column:1/-1;resize:vertical;min-height:60px;}
   .d-form .row2{grid-column:1/-1;display:flex;gap:10px;align-items:center;}
   .savemark{font-family:var(--mono);font-size:11px;color:var(--ok);opacity:0;transition:opacity .4s;}
@@ -436,7 +466,7 @@
     .icon-btn{padding:7px 10px;font-size:12.5px;}
     .icon-btn .tx{display:none;}       /* 手机端只留图标，防止顶栏换行 */
     #logoutBtn .tx{display:inline;}    /* 退出保留文字，避免误触 */
-    .side{border-right:none;min-height:0;padding-bottom:8px;}
+    .side{border-right:none;padding-bottom:40px;}
     .detail{padding:18px 18px 80px;}
     .layout.showDetail .side{display:none;}
     .layout:not(.showDetail) .detail{display:none;}
@@ -483,17 +513,19 @@
   <!-- 主视图：列表 + 详情 -->
   <div class="layout" id="mainView">
     <aside class="side">
-      <div class="side-head">
-        <h2>时间轴节点</h2>
-        <button class="btn" id="newNode" style="padding:6px 12px;font-size:13px">＋ 新建</button>
+      <div class="side-top">
+        <div class="side-head">
+          <h2>时间轴节点</h2>
+          <button class="btn" id="newNode" style="padding:6px 12px;font-size:13px">＋ 新建</button>
+        </div>
+        <div class="side-search" id="sideSearch">
+          <span class="ic" aria-hidden="true">🔍</span>
+          <input type="search" id="nodeSearch" placeholder="搜标题或日期…"
+                 autocomplete="off" aria-label="搜索节点">
+          <button class="clr" id="nodeSearchClr" aria-label="清除搜索">✕</button>
+        </div>
+        <div class="side-hit" id="sideHit" hidden></div>
       </div>
-      <div class="side-search" id="sideSearch">
-        <span class="ic" aria-hidden="true">🔍</span>
-        <input type="search" id="nodeSearch" placeholder="搜标题或日期…"
-               autocomplete="off" aria-label="搜索节点">
-        <button class="clr" id="nodeSearchClr" aria-label="清除搜索">✕</button>
-      </div>
-      <div class="side-hit" id="sideHit" hidden></div>
       <div class="nodes" id="nodeList"></div>
     </aside>
 
@@ -829,6 +861,7 @@ $('#nodeList').addEventListener('click', e => {
   state.sel = b.dataset.id;
   clearSel();                                       /* 换节点即清空选择 */
   renderList(); renderDetail();
+  $('#detail').scrollTop = 0;                       /* 详情栏回顶 */
   $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
 });
 
@@ -1425,7 +1458,9 @@ $('#newNode').addEventListener('click', async () => {
     const n = mapNode(d);
     n._loaded = true;                     /* 新节点必然是空的，不必再请求 */
     state.nodes.unshift(n); state.sel = n.id;
-    renderAll(); $('#mainView').classList.add('showDetail');
+    renderAll();
+    $('#detail').scrollTop = 0;
+    $('#mainView').classList.add('showDetail');
     setTimeout(() => { $('#fTitle')?.focus(); $('#fTitle')?.select(); }, 50);
   }catch(err){
     toast(errMsg(err, '新建失败'), 'err');
