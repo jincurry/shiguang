@@ -462,26 +462,35 @@
     will-change:transform;
   }
   body.light .lb-frame{box-shadow:0 30px 70px rgba(90,75,55,.35);}
-  .lb-card:first-child .lb-frame{transform:rotate(-4deg) scale(.94);}
-  .lb-card:last-child  .lb-frame{transform:rotate(4deg) scale(.94);}
-  .lb-track.anim .lb-frame{transition:transform .32s cubic-bezier(.22,.9,.3,1);}
+  .lb-card:first-child .lb-frame{transform:rotate(-9deg) scale(.86);}
+  .lb-card:last-child  .lb-frame{transform:rotate(9deg) scale(.86);}
+  .lb-track.anim .lb-frame{transition:transform .42s cubic-bezier(.22,.9,.3,1);}
 
   /* 换片：新到位的相纸先是欠曝模糊，很快显影清晰；同时像被夹子挂上一样摆两下 */
   .lb-track.swap .lb-card:nth-child(2) .lb-pic{
-    animation:lbDevelop .55s cubic-bezier(.25,.7,.35,1) both;
+    animation:lbDevelop .75s cubic-bezier(.25,.7,.35,1) both;
   }
   @keyframes lbDevelop{
-    from{filter:contrast(.45) brightness(1.45) sepia(.4) blur(3px);}
-    to  {filter:none;}
+    0%  {filter:contrast(.3) brightness(1.6) sepia(.5) blur(6px);}
+    35% {filter:contrast(.6) brightness(1.25) sepia(.28) blur(2px);}
+    100%{filter:none;}
   }
   .lb-track.swap .lb-card:nth-child(2) .lb-frame{
-    animation:lbSwing .62s cubic-bezier(.3,.6,.4,1) both;
+    animation:lbSwing .8s cubic-bezier(.3,.6,.4,1) both;
   }
   @keyframes lbSwing{
-    0%  {transform:rotate(var(--sw,3deg)) translateY(-4px);}
-    42% {transform:rotate(calc(var(--sw,3deg) * -.42));}
-    72% {transform:rotate(calc(var(--sw,3deg) * .18));}
+    0%  {transform:rotate(var(--sw,6deg)) translateY(-10px) scale(.96);}
+    38% {transform:rotate(calc(var(--sw,6deg) * -.4)) translateY(0) scale(1.008);}
+    68% {transform:rotate(calc(var(--sw,6deg) * .18)) scale(.998);}
     100%{transform:none;}
+  }
+  /* 换片时一道暖光扫过相纸，像放大机的灯扫了一遍 */
+  .lb-track.swap .lb-card:nth-child(2) .lb-zoom::before{
+    animation:lbWipe .6s ease-out both;
+  }
+  @keyframes lbWipe{
+    0%  {background:linear-gradient(105deg,transparent 0%,rgba(255,240,214,.5) 8%,transparent 22%);}
+    100%{background:linear-gradient(105deg,transparent 78%,rgba(255,240,214,0) 92%,transparent 100%);}
   }
 
   .lightbox.first-open .lb-card:nth-child(2) .lb-frame{
@@ -1250,7 +1259,7 @@ function resetZoom(anim=false){ zs=1; ztx=0; zty=0; applyZoom(anim); }
 
 function setX(px, animate=false){
   const on = animate && !reduceMotion;
-  track.style.transition = on ? 'transform .32s cubic-bezier(.22,.9,.3,1)' : 'none';
+  track.style.transition = on ? 'transform .42s cubic-bezier(.22,.9,.3,1)' : 'none';
   track.classList.toggle('anim', on);
   track.style.transform = `translateX(${-W + px}px)`;
 }
@@ -1260,9 +1269,9 @@ function parallax(px){
   const t  = Math.max(-1, Math.min(1, px / W));
   const p0 = Math.max(0,  t);
   const p2 = Math.max(0, -t);
-  fs[0].style.transform = `rotate(${-4*(1-p0)}deg) scale(${.94+.06*p0})`;
-  fs[1].style.transform = `rotate(${-4*t}deg) scale(${1-.06*Math.abs(t)})`;
-  fs[2].style.transform = `rotate(${ 4*(1-p2)}deg) scale(${.94+.06*p2})`;
+  fs[0].style.transform = `rotate(${-9*(1-p0)}deg) scale(${.86+.14*p0})`;
+  fs[1].style.transform = `rotate(${-9*t}deg) scale(${1-.14*Math.abs(t)})`;
+  fs[2].style.transform = `rotate(${ 9*(1-p2)}deg) scale(${.86+.14*p2})`;
 }
 const DOTS_MAX = 12;                  /* 再多就铺不下，改用计数 */
 function renderDots(){
@@ -1310,13 +1319,13 @@ function slide(dir){
     animating = false;
     if(!swiped){ swiped = true; lbFooter.classList.add('hide-hint'); }
   };
-  reduceMotion ? done() : setTimeout(done, 330);
+  reduceMotion ? done() : setTimeout(done, 420);
 }
 
 /* 换片入场：显影 + 钟摆。track 每次都是新 DOM，加个 class 就能重新触发 */
 function swapIn(dir){
   if(reduceMotion) return;
-  track.style.setProperty('--sw', (dir > 0 ? 3.2 : -3.2) + 'deg');
+  track.style.setProperty('--sw', (dir > 0 ? 6.5 : -6.5) + 'deg');
   track.classList.remove('swap');
   void track.offsetWidth;                /* 强制重排，动画才会重放 */
   track.classList.add('swap');
@@ -1369,6 +1378,7 @@ function burstAt(x, y, dominant, opt){
     lift: 1.6,                        /* 上抛量 */
     flash: 1, ring: true,             /* 闪光与冲击波 */
     dir: 0, spread: Math.PI * 2,      /* 方向偏置与张角：0 表示整圈铺开 */
+    span: 0,                          /* 沿竖直方向的发射长度：0 是点源 */
   }, opt);
   const dpr = Math.min(devicePixelRatio || 1, 2);
   if(!sparkCv){
@@ -1398,8 +1408,10 @@ function burstAt(x, y, dominant, opt){
     /* 速度分两层：大部分飞得远，小部分留在近处慢慢熄，才有层次 */
     const sp = (Math.random() < .72 ? o.fast * .65 + Math.random() * o.fast
                                     : 1.4 + Math.random() * o.slow) * scale;
+    /* 沿相纸整条边撕开，比从一个点喷出去显眼得多 */
+    const oy = o.span ? (Math.random() - .5) * o.span : 0;
     sparkParts.push({
-      x, y, px: x, py: y,
+      x, y: y + oy, px: x, py: y + oy,
       vx: Math.cos(a) * sp,
       vy: Math.sin(a) * sp - o.lift,       /* 略微上抛，落下来才好看 */
       life: 30 + Math.random() * 34, age: 0,
@@ -1423,12 +1435,13 @@ function sparkTrail(dir, dominant){
   if(now - lastTrail < 260) return;      /* 按住方向键狂翻时别堆积 */
   lastTrail = now;
   const r = frame.getBoundingClientRect();
-  burstAt(dir > 0 ? r.right - 6 : r.left + 6, r.top + r.height * .45, dominant, {
-    n: innerWidth < 640 ? 10 : 16,
-    fast: 4.2, slow: 2, lift: .6,
-    flash: 0, ring: false,
+  burstAt(dir > 0 ? r.right - 4 : r.left + 4, r.top + r.height * .48, dominant, {
+    n: innerWidth < 640 ? 22 : 40,
+    fast: 8, slow: 3, lift: .9,
+    flash: .42, ring: false,             /* 一点闪光，让"换片"这一下有存在感 */
     dir: dir > 0 ? 0 : Math.PI,          /* 朝相纸滑走的反方向甩 */
-    spread: Math.PI * .8,
+    spread: Math.PI * .95,
+    span: r.height * .8,                 /* 沿相纸竖边整条撕开 */
   });
 }
 
