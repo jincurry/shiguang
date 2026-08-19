@@ -528,6 +528,24 @@
   .lb-footer.hide-hint .lb-swipe-hint{opacity:0;}
   @media (hover:hover){.lb-swipe-hint{display:none;}}
 
+  /* 回到顶部：逆序时间轴越翻越远，回头看最近的照片得一路滚回去 */
+  .totop{
+    position:fixed;right:min(4vw,26px);bottom:26px;z-index:38;
+    width:44px;height:44px;border-radius:50%;
+    display:grid;place-items:center;
+    font-size:17px;line-height:1;color:var(--ivory);
+    background:rgba(29,25,21,.94);border:1px solid rgba(237,229,216,.3);
+    box-shadow:0 4px 16px rgba(0,0,0,.5);
+    opacity:0;transform:translateY(10px);pointer-events:none;
+    transition:opacity .3s ease,transform .3s ease,background .25s,border-color .25s;
+  }
+  body.light .totop{
+    background:rgba(255,253,246,.96);border-color:rgba(46,42,36,.25);
+    box-shadow:0 4px 16px rgba(90,75,55,.25);
+  }
+  .totop.on{opacity:1;transform:none;pointer-events:auto;}
+  .totop:hover{background:var(--safelight);border-color:var(--safelight);color:#fff;}
+
   footer{
     position:relative;z-index:1;
     max-width:960px;margin:0 auto;padding:0 28px 64px;
@@ -590,6 +608,7 @@
     .year-nav .yr{font-size:9.5px;}
     .year-nav .yr span{opacity:0;}
     .year-nav .yr.act span{opacity:1;}
+    .totop{right:auto;left:16px;bottom:18px;width:40px;height:40px;}
   }
 </style>
 </head>
@@ -632,6 +651,7 @@
     <span class="lb-swipe-hint">滑动切换 · 下滑关闭 · 双击放大</span>
   </div>
 </div>
+<button class="totop" id="toTop" aria-label="回到顶部" title="回到最近的日子">↑</button>
 <span class="sr-only" id="lbLive" aria-live="polite"></span>
 
 <script>
@@ -783,6 +803,8 @@ const autoClose = new IntersectionObserver(es => {
       node.classList.remove('open');
       node.querySelector('.node-head').setAttribute('aria-expanded','false');
       node.querySelectorAll('.photo').forEach(p => p.tabIndex = -1);
+      clearTimeout(node._shrinkT);
+      node._shrinkT = setTimeout(() => shrinkStrip(node), 2000);
     }
   });
 }, {threshold:0});
@@ -890,19 +912,45 @@ function ensureAllPhotos(node){
     node._full = true;
     return Promise.resolve();
   }
+  /* 之前展开过、收起时被回收了 DOM：用缓存的照片数据重建，不必再请求 */
+  if(node._cache){
+    fillStrip(node, node._cache, node._date);
+    node._full = true;
+    return Promise.resolve();
+  }
   if(node._loading) return node._loading;
   node._loading = fetch(`${API}/nodes/${encodeURIComponent(node.dataset.id)}`)
     .then(res => { if(!res.ok) throw new Error(String(res.status)); return res.json(); })
     .then(n => {
-      const strip = node.querySelector('.strip');
-      strip.querySelectorAll('.photo').forEach(el => el.remove());
-      n.photos.forEach((p, i) => strip.appendChild(buildPhoto(p, n.date, i)));
-      scatter(strip.querySelectorAll('.photo'));
+      fillStrip(node, n.photos, n.date);
+      node._cache = n.photos;
       node._full = true;
       node._total = n.photos.length;
     })
     .finally(() => { node._loading = null; });
   return node._loading;
+}
+
+/* 用整套照片重建晾片带（钢丝保留，只换相纸） */
+function fillStrip(node, photos, date){
+  const strip = node.querySelector('.strip');
+  strip.querySelectorAll('.photo').forEach(el => el.remove());
+  photos.forEach((p, i) => strip.appendChild(buildPhoto(p, date, i)));
+  scatter(strip.querySelectorAll('.photo'));
+}
+
+/* 收起后回收 DOM：折叠摞只露 FOLD_N 张，多出来的相纸留在文档里纯属占用。
+   一个 192 张的节点展开后会让整页 DOM 涨到三倍，逛几个大节点就上万元素。
+   照片数据留在 node._cache，再次展开直接重建，不重新请求。 */
+function shrinkStrip(node){
+  if(node.classList.contains('open') || !node._full) return;
+  const ps = [...node.querySelectorAll('.photo')];
+  if(ps.length <= FOLD_N) return;
+  node._stripIO?.disconnect();
+  node._stripIO = null;
+  if(!node._cache) node._cache = ps.map(el => el._photo).filter(Boolean);
+  ps.slice(FOLD_N).forEach(el => el.remove());
+  node._full = false;
 }
 
 /* 横向懒加载：只显影滚进晾片带视口（含左右各一屏预取）的相纸。
@@ -940,6 +988,8 @@ function bindNode(node){
     if(open) roving(node);
     else node.querySelectorAll('.photo').forEach(p => p.tabIndex = -1);
     node._updateNav?.();
+    clearTimeout(node._shrinkT);
+    if(!open) node._shrinkT = setTimeout(() => shrinkStrip(node), 2000);
     if(open){
       wrap.scrollLeft = 0;
       /* 钢丝先拉开，照片补齐后再挂上；只显影滚到眼前的那几张 */
@@ -948,7 +998,12 @@ function bindNode(node){
       full.then(() => {
         wrap.classList.remove('loading');
         node.classList.toggle('is-empty', !node.querySelector('.photo'));
-        if(!node.classList.contains('open')) return;
+        if(!node.classList.contains('open')){
+          /* 补拉还在路上时用户就收起了：这批相纸同样要回收 */
+          clearTimeout(node._shrinkT);
+          node._shrinkT = setTimeout(() => shrinkStrip(node), 2000);
+          return;
+        }
         roving(node);
         stripLazy(node);
         node._updateNav?.();
@@ -1094,7 +1149,13 @@ yearNav.addEventListener('click', e => {
   if(b) document.getElementById('y' + b.dataset.year)
           ?.scrollIntoView({behavior:'smooth', block:'start'});
 });
+const toTop = document.getElementById('toTop');
+toTop.addEventListener('click', () => {
+  scrollTo({top: 0, behavior: reduceMotion ? 'auto' : 'smooth'});
+  document.querySelector('h1')?.focus?.();
+});
 function spy(){
+  toTop.classList.toggle('on', scrollY > innerHeight * 2);
   const mark = scrollY + innerHeight * .35;
   let cur = yrBtns[0]?.dataset.year;
   years.forEach(y => {
