@@ -135,6 +135,65 @@
   .btn.danger:hover{background:var(--safelight);color:#fff;border-color:var(--safelight);filter:none;}
   .door .hint{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;}
 
+  /* ============ 日期选择器 ============
+     原生 input[type=date] 的外观在各浏览器互不相同、也无法定制，
+     和暗房主题格格不入；这里手搓一个，样式全走同一套变量。 */
+  .dp{position:relative;}
+  .dp-trigger{
+    width:100%;display:flex;align-items:center;gap:10px;
+    background:var(--field);border:1px solid var(--field-line);border-radius:8px;
+    padding:9px 12px;color:var(--ivory);text-align:left;
+    transition:border-color .25s,box-shadow .25s;
+  }
+  .dp-trigger:hover{border-color:var(--muted);}
+  .dp.open .dp-trigger{border-color:var(--amber);box-shadow:0 0 0 3px rgba(217,160,91,.16);}
+  .dp-val{flex:1;font-family:var(--mono);font-size:13.5px;letter-spacing:.08em;}
+  .dp-wd{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;}
+  .dp-ic{width:15px;height:15px;flex:none;color:var(--amber);opacity:.8;}
+
+  .dp-pop{
+    position:fixed;z-index:70;width:272px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px;box-shadow:0 20px 48px rgba(0,0,0,.55);
+    animation:dpIn .18s ease;
+  }
+  body.light .dp-pop{box-shadow:0 20px 48px rgba(90,75,55,.28);}
+  .dp-pop[hidden]{display:none;}
+  @keyframes dpIn{from{opacity:0;transform:translateY(-6px);}to{opacity:1;}}
+  .dp-head{display:flex;align-items:center;gap:4px;margin-bottom:12px;}
+  .dp-title{
+    flex:1;text-align:center;font-family:var(--serif);font-weight:600;
+    font-size:15px;letter-spacing:.08em;
+  }
+  .dp-nav{
+    width:27px;height:27px;border-radius:7px;flex:none;
+    display:grid;place-items:center;color:var(--muted);font-size:12px;
+    transition:background .2s,color .2s;
+  }
+  .dp-nav:hover{background:var(--bg-soft);color:var(--amber);}
+  .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+  .dp-w{
+    font-family:var(--mono);font-size:10px;color:var(--faint);
+    text-align:center;padding:2px 0 6px;letter-spacing:.04em;
+  }
+  .dp-day{
+    height:32px;border-radius:8px;display:grid;place-items:center;
+    font-family:var(--mono);font-size:12.5px;color:var(--ivory);
+    transition:background .15s,color .15s;
+  }
+  .dp-day:hover{background:var(--bg-soft);}
+  .dp-day.out{color:var(--faint);}
+  .dp-day.today{box-shadow:inset 0 0 0 1px rgba(212,85,59,.75);}
+  .dp-day.sel{background:var(--amber);color:#241B0E;box-shadow:none;}
+  .dp-day.sel:hover{background:var(--amber);}
+  .dp-foot{
+    margin-top:12px;padding-top:10px;border-top:1px solid var(--hairline);
+    display:flex;align-items:center;justify-content:space-between;
+    font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;
+  }
+  .dp-foot button{color:var(--muted);padding:3px 8px;border-radius:6px;font-size:11px;}
+  .dp-foot button:hover{color:var(--amber);background:var(--bg-soft);}
+
   /* ============ 工作台框架 ============
      整个工作台锁定为一屏高（100dvh），顶栏之下由左右两栏各自滚动：
      左栏节点列表再长也不推着右栏跑，选完底部节点不用再拉回顶部看照片。 */
@@ -829,6 +888,7 @@ $('#logoutBtn').addEventListener('click', logout);
 if(token()){ enterApp().catch(() => sessionStorage.removeItem('sg_token')); }
 
 /* ================= 渲染 ================= */
+let datePicker = null;
 function renderAll(){ renderList(); renderDetail(); renderStats(); renderTrashBadge(); }
 function renderStats(){
   const p = state.nodes.reduce((a, n) => a + (n.photo_count || 0), 0);
@@ -897,6 +957,194 @@ $('#nodeList').addEventListener('click', e => {
   $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
 });
 
+/* ================= 日期选择器 =================
+   原生 input[type=date] 的外观各浏览器不一、无法定制，和暗房主题格格不入。
+   这里手搓一个：真值仍写在 hidden input#fDate 上，读取方一行都不用改。 */
+const DP_WEEK = ['一', '二', '三', '四', '五', '六', '日'];
+const pad2 = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+function parseYMD(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  if(!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  /* 反查一遍挡住 2026-02-31 这类溢出到下个月的日期 */
+  return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3])
+    ? d : null;
+}
+const sameDay = (a, b) => a && b && ymd(a) === ymd(b);
+/* 周一为一周之首：JS 的 getDay() 里周日是 0 */
+const mondayIndex = d => (d.getDay() + 6) % 7;
+
+function mountDatePicker(root, onPick){
+  const input   = root.querySelector('input[type=hidden]');
+  const trigger = root.querySelector('.dp-trigger');
+  const valEl   = root.querySelector('.dp-val');
+  const wdEl    = root.querySelector('.dp-wd');
+  const pop     = root.querySelector('.dp-pop');
+  const today   = new Date();
+
+  let sel  = parseYMD(input.value) || new Date();
+  let view = new Date(sel.getFullYear(), sel.getMonth(), 1);   /* 面板当前月 */
+  let cur  = new Date(sel);                                    /* 键盘光标 */
+
+  function paintTrigger(){
+    valEl.textContent = ymd(sel);
+    wdEl.textContent = '周' + DP_WEEK[mondayIndex(sel)];
+  }
+  function commit(d){
+    sel = new Date(d); cur = new Date(d);
+    input.value = ymd(sel);
+    paintTrigger();
+    onPick?.(input.value);
+  }
+
+  function renderCal(){
+    const y = view.getFullYear(), m = view.getMonth();
+    const first = new Date(y, m, 1);
+    const start = new Date(y, m, 1 - mondayIndex(first));      /* 网格从周一起 */
+
+    const head = document.createElement('div');
+    head.className = 'dp-head';
+    head.innerHTML = `
+      <button type="button" class="dp-nav" data-mv="-12" aria-label="上一年">«</button>
+      <button type="button" class="dp-nav" data-mv="-1" aria-label="上个月">‹</button>
+      <span class="dp-title">${y} 年 ${m + 1} 月</span>
+      <button type="button" class="dp-nav" data-mv="1" aria-label="下个月">›</button>
+      <button type="button" class="dp-nav" data-mv="12" aria-label="下一年">»</button>`;
+
+    const grid = document.createElement('div');
+    grid.className = 'dp-grid';
+    grid.innerHTML = DP_WEEK.map(w => `<span class="dp-w">${w}</span>`).join('');
+    for(let i = 0; i < 42; i++){
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dp-day'
+        + (d.getMonth() !== m ? ' out' : '')
+        + (sameDay(d, today) ? ' today' : '')
+        + (sameDay(d, sel) ? ' sel' : '');
+      b.dataset.d = ymd(d);
+      b.tabIndex = sameDay(d, cur) ? 0 : -1;
+      b.textContent = d.getDate();
+      b.setAttribute('aria-label', `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`);
+      if(sameDay(d, sel)) b.setAttribute('aria-current', 'date');
+      grid.appendChild(b);
+    }
+
+    const foot = document.createElement('div');
+    foot.className = 'dp-foot';
+    foot.innerHTML = `<button type="button" data-today="1">回到今天</button>
+                      <span>↑↓←→ 选日 · Esc 关闭</span>`;
+
+    pop.textContent = '';
+    pop.append(head, grid, foot);
+  }
+
+  function place(){
+    const r = trigger.getBoundingClientRect();
+    const h = pop.offsetHeight || 320, w = pop.offsetWidth || 272;
+    /* 下方放不下就翻到上面；右边超出就贴右缘。用 fixed 定位，
+       免得被 .detail 的 overflow 裁掉 */
+    const below = innerHeight - r.bottom - 10;
+    pop.style.top = (below >= h || r.top < h + 10 ? r.bottom + 6 : r.top - h - 6) + 'px';
+    pop.style.left = Math.max(10, Math.min(r.left, innerWidth - w - 10)) + 'px';
+  }
+
+  function open(){
+    if(!pop.hidden) return;
+    cur = new Date(sel);
+    view = new Date(sel.getFullYear(), sel.getMonth(), 1);
+    renderCal();
+    pop.hidden = false;
+    root.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+    place();
+    pop.querySelector('.dp-day[tabindex="0"]')?.focus();
+  }
+  function close(back){
+    if(pop.hidden) return;
+    pop.hidden = true;
+    root.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+    if(back) trigger.focus();
+  }
+  function move(days){
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + days);
+    view = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    renderCal();
+    pop.querySelector('.dp-day[tabindex="0"]')?.focus();
+  }
+
+  trigger.addEventListener('click', () => pop.hidden ? open() : close());
+  pop.addEventListener('click', e => {
+    const nav = e.target.closest('.dp-nav');
+    if(nav){
+      const mv = +nav.dataset.mv;
+      view = new Date(view.getFullYear(), view.getMonth() + mv, 1);
+      /* 光标跟到新月份，且不越过月末（1/31 翻到 2 月要落在 2/28） */
+      const last = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+      cur = new Date(view.getFullYear(), view.getMonth(), Math.min(cur.getDate(), last));
+      renderCal();
+      /* 重建后原按钮已被替换，把焦点还给同一个按钮，连点翻月才不断 */
+      pop.querySelector(`.dp-nav[data-mv="${mv}"]`)?.focus();
+      return;
+    }
+    if(e.target.closest('[data-today]')){ commit(new Date()); close(true); return; }
+    const day = e.target.closest('.dp-day');
+    if(day){ commit(parseYMD(day.dataset.d)); close(true); }
+  });
+  const escClose = e => {
+    if(e.key === 'Escape' && !pop.hidden){ e.preventDefault(); close(true); }
+  };
+  document.addEventListener('keydown', escClose);
+  pop.addEventListener('keydown', e => {
+    const k = e.key;
+    if(k === 'Enter' || k === ' '){
+      if(e.target.classList.contains('dp-day')) return;   /* 交给 click */
+      return;
+    }
+    const step = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7,
+                  PageUp: null, PageDown: null}[k];
+    if(step !== undefined){
+      e.preventDefault();
+      if(k === 'PageUp' || k === 'PageDown'){
+        const mv = k === 'PageUp' ? -1 : 1;
+        const t = new Date(cur.getFullYear(), cur.getMonth() + mv, 1);
+        const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+        cur = new Date(t.getFullYear(), t.getMonth(), Math.min(cur.getDate(), last));
+        view = new Date(cur.getFullYear(), cur.getMonth(), 1);
+        renderCal();
+        pop.querySelector('.dp-day[tabindex="0"]')?.focus();
+      }else{
+        move(step);
+      }
+      return;
+    }
+    if(k === 'Home' || k === 'End'){
+      e.preventDefault();
+      const last = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+      cur = new Date(cur.getFullYear(), cur.getMonth(), k === 'Home' ? 1 : last);
+      renderCal();
+      pop.querySelector('.dp-day[tabindex="0"]')?.focus();
+    }
+  });
+  /* 点到别处、页面滚动、窗口尺寸变化都关掉：fixed 定位不跟随滚动容器 */
+  const away = e => { if(!root.contains(e.target)) close(); };
+  document.addEventListener('pointerdown', away);
+  const bye = () => close();
+  $('.detail')?.addEventListener('scroll', bye, {passive: true});
+  addEventListener('resize', bye);
+  root._unmount = () => {
+    document.removeEventListener('pointerdown', away);
+    document.removeEventListener('keydown', escClose);
+    $('.detail')?.removeEventListener('scroll', bye);
+    removeEventListener('resize', bye);
+  };
+
+  paintTrigger();
+  return {get value(){ return input.value; }};
+}
+
 function renderDetail(){
   const n = node(state.sel);
   const d = $('#detail');
@@ -905,8 +1153,20 @@ function renderDetail(){
     <button class="icon-btn backbtn" id="backList">← 节点列表</button>
     <div class="d-form">
       <div class="f">
-        <label for="fDate">日期</label>
-        <input type="date" id="fDate" value="${esc(n.date)}">
+        <label id="fDateLabel">日期</label>
+        <div class="dp" id="dpDate">
+          <input type="hidden" id="fDate" value="${esc(n.date)}">
+          <button type="button" class="dp-trigger" aria-haspopup="dialog"
+                  aria-expanded="false" aria-labelledby="fDateLabel">
+            <svg class="dp-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                 stroke-width="1.3" aria-hidden="true">
+              <rect x="1.8" y="3.2" width="12.4" height="11" rx="2"/>
+              <path d="M1.8 6.6h12.4M5.2 1.8v2.6M10.8 1.8v2.6"/>
+            </svg>
+            <span class="dp-val"></span><span class="dp-wd"></span>
+          </button>
+          <div class="dp-pop" role="dialog" aria-label="选择日期" hidden></div>
+        </div>
       </div>
       <div class="f">
         <label for="fTitle">标题</label>
@@ -961,6 +1221,9 @@ function renderDetail(){
     });
   }
 
+  datePicker?._unmount?.();
+  datePicker = $('#dpDate');
+  mountDatePicker(datePicker);
   $('#gridSelAll').onclick = () => {
     n.photos.forEach(p => { if(!String(p.id).startsWith('tmp-')) sel.add(p.id); });
     syncSel();
