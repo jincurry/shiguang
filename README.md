@@ -250,6 +250,35 @@ curl -s -X POST $BASE/api/v1/photos/batch -H "$AUTH" -H 'Content-Type: applicati
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $BASE/api/v1/nodes/$NODE/photos -H "$AUTH" -F file=@photo.jpg
 ```
 
+## 导出：让这份档案能离开这套软件
+
+```bash
+sgctl export ~/拾光集备份 --server https://photos.example.com
+```
+
+导出的是**人类可读的目录**，不依赖这套软件也能用：
+
+```
+2019-10-06 小妹的婚礼/
+  shiguang.txt            这个日子的日期、标题、地点、描述
+  01 接亲那天早上.jpg      原图（不是网页压缩版），序号即相册里的顺序
+  01 接亲那天早上.txt      图注、拍摄时间，以及写在相纸背面的话
+这份导出是什么.txt          目录怎么读、怎么放回去
+```
+
+三件事让它成为真正的档案：
+
+- **原图**：导出的是上传时那一份原始字节（sha256 逐字节一致），不是 webp 变体
+- **文字在照片旁边**：图注与背面手记就在同名 `.txt` 里，任何编辑器都能打开；相比之下 SQLite 里的字，三十年后没几个人打得开
+- **能放回去**：`shiguang.txt` 用的就是 `sgctl import` 认识的清单格式，导出的目录可以原样导回来
+
+```bash
+sgctl export ./近三年 --from 2023-01-01 --dry-run   # 先看看会导出什么
+sgctl export ~/备份                                  # 中断后重跑只补缺的那些
+```
+
+断点续传按文件大小判定（内容寻址保证同一张照片字节数不变）：212 张的相册原样重跑 22ms、零下载。
+
 ## 备份恢复手册
 
 **要备份的两样东西：**

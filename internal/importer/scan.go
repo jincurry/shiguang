@@ -58,6 +58,7 @@ type Group struct {
 	Date        string // YYYY-MM-DD，取组内最早的拍摄时间
 	Title       string
 	Description string // 仅来自清单文件；否则为空
+	Place       string // 仅来自清单文件；否则为空
 	Photos      []*Photo
 	// DateFromEXIF 表示决定 Date 的那张照片是否带 EXIF 拍摄时间。
 	// 为 false 说明日期来自文件修改时间——扫描的老照片、被聊天软件转发过的

@@ -21,6 +21,7 @@ const (
 	keyDate  = "date"
 	keyTitle = "title"
 	keyDesc  = "description"
+	keyPlace = "place"
 )
 
 // Manifest 是一个目录下的清单内容。
@@ -30,6 +31,7 @@ type Manifest struct {
 	Date        string            // 空 = 不覆盖
 	Title       string            // 空 = 不覆盖
 	Description string            // 空 = 不覆盖
+	Place       string            // 空 = 不覆盖
 	Captions    map[string]string // 小写文件名 → 图注
 	Warnings    []string
 }
@@ -103,6 +105,13 @@ func ParseManifest(path string, r fs.File) (*Manifest, error) {
 				val = clampRunes(val, 120)
 			}
 			m.Title = val
+		case keyPlace:
+			if len([]rune(val)) > 80 {
+				m.Warnings = append(m.Warnings,
+					fmt.Sprintf("第 %d 行的地点超过 80 字，已截断", lineNo))
+				val = string([]rune(val)[:80])
+			}
+			m.Place = val
 		case keyDesc:
 			if len([]rune(val)) > 2000 {
 				m.Warnings = append(m.Warnings,
@@ -244,6 +253,9 @@ func ApplyManifests(root string, photos []*Photo, groups []*Group,
 		}
 		if m.Description != "" {
 			g.Description = m.Description
+		}
+		if m.Place != "" {
+			g.Place = m.Place
 		}
 	}
 	// 有节点级字段、但目录并不唯一对应一个节点 → 明确告诉用户没生效

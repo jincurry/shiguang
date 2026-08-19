@@ -39,9 +39,12 @@ func (e *APIError) IsDuplicate() bool { return e.Status == http.StatusConflict }
 
 // PhotoDTO / NodeDTO 只声明导入需要的字段。
 type PhotoDTO struct {
-	ID      string `json:"id"`
-	Caption string `json:"caption"`
-	Status  string `json:"status"`
+	ID        string  `json:"id"`
+	Caption   string  `json:"caption"`
+	Note      string  `json:"note"`
+	Status    string  `json:"status"`
+	TakenAt   *string `json:"taken_at"`
+	SizeBytes *int64  `json:"size_bytes"`
 }
 
 // NodeDTO 是时间轴节点。
@@ -50,6 +53,7 @@ type NodeDTO struct {
 	Date        string      `json:"date"`
 	Title       string      `json:"title"`
 	Description string      `json:"description"`
+	Place       string      `json:"place"`
 	PhotoCount  int         `json:"photo_count"`
 	Photos      []*PhotoDTO `json:"photos"`
 }
@@ -143,10 +147,38 @@ func (c *Client) ListNodes(ctx context.Context) ([]*NodeDTO, error) {
 	}
 }
 
+// DownloadOriginal 把某张照片的原图写到 w，返回写入字节数。
+func (c *Client) DownloadOriginal(ctx context.Context, photoID string, w io.Writer) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		c.base+"/api/v1/photos/"+url.PathEscape(photoID)+"/original", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	res, err := c.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+		e := &APIError{Status: res.StatusCode}
+		_ = json.Unmarshal(body, e)
+		if ra := res.Header.Get("Retry-After"); ra != "" {
+			e.RetryAfter, _ = strconv.Atoi(ra)
+		}
+		if e.Message == "" {
+			e.Message = strings.TrimSpace(string(body))
+		}
+		return 0, e
+	}
+	return io.Copy(w, res.Body)
+}
+
 // CreateNode 新建节点。
-func (c *Client) CreateNode(ctx context.Context, date, title, desc string) (*NodeDTO, error) {
+func (c *Client) CreateNode(ctx context.Context, date, title, desc, place string) (*NodeDTO, error) {
 	body, _ := json.Marshal(map[string]string{
-		"date": date, "title": title, "description": desc,
+		"date": date, "title": title, "description": desc, "place": place,
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.base+"/api/v1/nodes",
 		bytes.NewReader(body))
