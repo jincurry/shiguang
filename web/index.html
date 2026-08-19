@@ -423,6 +423,19 @@
   }
 
   /* ============ 灯箱 ============ */
+  /* 火花层：盖在灯箱之上，但不吃任何点击 */
+  .sparks{
+    position:fixed;z-index:110;pointer-events:none;
+    will-change:transform;                 /* 提升为独立合成层 */
+  }
+  /* 火花绽放期间灯箱不做实时毛玻璃：canvas 每帧重绘会连带把下面那层
+     backdrop-filter 全屏重算一遍，实测帧率因此腰斩。换成加深的纯色底。 */
+  body.sparking .lightbox{
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+    background:rgba(12,10,8,.93);
+  }
+  body.sparking.light .lightbox{background:rgba(240,235,225,.95);}
+
   .lightbox{
     position:fixed;inset:0;z-index:100;
     background:var(--lb-bg);
@@ -1277,6 +1290,156 @@ function jump(i){
     });
   },160);
 }
+/* ================= 绽放特效 =================
+   点开一张相纸时，从它原来的位置炸开一蓬火花——老式镁光灯（flash powder）
+   点燃的那一瞬：先一道白光，再是四散的火星，边落边熄。
+   火花颜色取这张照片自己的主色，所以每张炸出来的颜色都不一样。
+   canvas 只在特效期间存在，放完即销毁；prefers-reduced-motion 下整个跳过。 */
+const SPARK_BASE = [[217,160,91], [237,229,216], [212,85,59]];   /* 琥珀 / 象牙 / 安全灯 */
+
+function rgbOf(hex){
+  const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex || '');
+  return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : null;
+}
+/* 照片主色往往偏暗，火星得亮起来才像在燃烧 */
+function ember(c){
+  return c.map(v => Math.round(Math.min(255, v * .55 + 150)));
+}
+
+let sparkCv = null, sparkCtx = null, sparkParts = [], sparkRAF = 0, sparkFlash = 0;
+let sparkBox = {x: 0, y: 0, w: 0, h: 0};
+let sparkRing = -1;                     /* 冲击波圆环的推进进度，<0 表示不画 */
+
+function sparkStop(){
+  cancelAnimationFrame(sparkRAF);
+  sparkRAF = 0; sparkParts = [];
+  sparkCv?.remove();
+  sparkCv = null; sparkCtx = null;
+  document.body.classList.remove('sparking');
+}
+
+function burstAt(x, y, dominant){
+  if(reduceMotion) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if(!sparkCv){
+    sparkCv = document.createElement('canvas');
+    sparkCv.className = 'sparks';
+    document.body.appendChild(sparkCv);
+    sparkCtx = sparkCv.getContext('2d');
+  }
+  sparkBox = {x: 0, y: 0, w: innerWidth, h: innerHeight};
+  sparkCv.style.left = '0'; sparkCv.style.top = '0';
+  sparkCv.style.width = innerWidth + 'px';
+  sparkCv.style.height = innerHeight + 'px';
+  sparkCv.width = innerWidth * dpr;
+  sparkCv.height = innerHeight * dpr;
+  sparkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  document.body.classList.add('sparking');
+
+  const own = rgbOf(dominant);
+  const palette = own ? [ember(own), ember(own), ...SPARK_BASE] : SPARK_BASE;
+  /* 小屏少放一些，别让低端机掉帧 */
+  const n = innerWidth < 640 ? 64 : 112;
+  const scale = Math.min(1, innerWidth / 1280) * .5 + .6;
+
+  for(let i = 0; i < n; i++){
+    /* 角度均匀铺开再加抖动，避免出现规则的放射线 */
+    const a = (i / n) * Math.PI * 2 + (Math.random() - .5) * .55;
+    /* 速度分两层：大部分飞得远，小部分留在近处慢慢熄，才有层次 */
+    const sp = (Math.random() < .72 ? 5.5 + Math.random() * 8.5 : 1.8 + Math.random() * 3.4) * scale;
+    sparkParts.push({
+      x, y, px: x, py: y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp - 1.6,          /* 略微上抛，落下来才好看 */
+      life: 38 + Math.random() * 34, age: 0,
+      w: .9 + Math.random() * 2.1,
+      c: palette[(Math.random() * palette.length) | 0],
+      split: Math.random() < .3 ? 1 : 0,   /* 三成会在半路二次绽开 */
+    });
+  }
+  sparkFlash = 1;
+  sparkRing = 0;
+  if(!sparkRAF) sparkRAF = requestAnimationFrame(sparkTick);
+}
+
+function sparkTick(){
+  if(!sparkCtx){ sparkRAF = 0; return; }
+  const w = sparkBox.w, h = sparkBox.h;
+  sparkCtx.clearRect(0, 0, w, h);
+
+  /* 镁光灯炸开的那道白光：一圈迅速扩散、迅速淡掉的暖白 */
+  if(sparkFlash > 0.01 && sparkParts.length){
+    const p0 = sparkParts[0];
+    const r = (1 - sparkFlash) * 260 + 24;
+    const g = sparkCtx.createRadialGradient(p0.x, p0.y, 0, p0.x, p0.y, r);
+    g.addColorStop(0, `rgba(255,244,224,${sparkFlash * .5})`);
+    g.addColorStop(.55, `rgba(255,226,180,${sparkFlash * .16})`);
+    g.addColorStop(1, 'rgba(255,220,170,0)');
+    sparkCtx.fillStyle = g;
+    sparkCtx.fillRect(0, 0, w, h);
+    sparkFlash *= .82;
+  }
+
+  sparkCtx.lineCap = 'round';
+  sparkCtx.globalCompositeOperation = 'lighter';   /* 火星叠加才有灼亮感 */
+
+  /* 冲击波：一圈迅速铺开又立刻散掉的细环 */
+  if(sparkRing >= 0 && sparkRing < 1 && sparkParts.length){
+    const p0 = sparkParts[0];
+    sparkRing += .075;
+    const rr = sparkRing * 300 + 10;
+    sparkCtx.strokeStyle = `rgba(255,236,206,${(1 - sparkRing) * .5})`;
+    sparkCtx.lineWidth = 2.4 * (1 - sparkRing) + .4;
+    sparkCtx.beginPath();
+    sparkCtx.arc(p0.x, p0.y, rr, 0, Math.PI * 2);
+    sparkCtx.stroke();
+  }
+
+  const born = [];
+  sparkParts = sparkParts.filter(p => {
+    p.px = p.x; p.py = p.y;
+    p.vy += .085;                /* 重力：比真火星轻，飘得开一点 */
+    p.vx *= .987; p.vy *= .987;  /* 空气阻力 */
+    p.x += p.vx; p.y += p.vy;
+    p.age++;
+    const t = p.age / p.life;
+    if(t >= 1) return false;
+    /* 二次绽开：半路炸成两三粒小火星，烟花的第二层 */
+    if(p.split && t > .42){
+      p.split = 0;
+      const k = 2 + ((Math.random() * 2) | 0);
+      for(let i = 0; i < k; i++){
+        const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6;
+        born.push({
+          x: p.x, y: p.y, px: p.x, py: p.y,
+          vx: p.vx * .3 + Math.cos(a) * sp,
+          vy: p.vy * .3 + Math.sin(a) * sp,
+          life: 16 + Math.random() * 18, age: 0,
+          w: .6 + Math.random() * 1.1, c: p.c, split: 0,
+        });
+      }
+    }
+    /* 快熄灭时闪一下，像余烬 */
+    const flick = t > .6 ? (.5 + Math.random() * .5) : 1;
+    sparkCtx.strokeStyle = `rgba(${p.c[0]},${p.c[1]},${p.c[2]},${(1 - t) * flick})`;
+    sparkCtx.lineWidth = p.w * (1 - t * .55);
+    sparkCtx.beginPath();
+    /* 拖尾拉长到两帧多的位移，飞得快的火星才拖得出线 */
+    sparkCtx.moveTo(p.x - p.vx * 2.4, p.y - p.vy * 2.4);
+    sparkCtx.lineTo(p.x, p.y);
+    sparkCtx.stroke();
+    return true;
+  });
+  if(born.length) sparkParts.push(...born);
+  sparkCtx.globalCompositeOperation = 'source-over';
+
+  if(sparkParts.length || sparkFlash > 0.01 || (sparkRing >= 0 && sparkRing < 1)){
+    sparkRAF = requestAnimationFrame(sparkTick);
+  }else{
+    sparkStop();
+  }
+}
+
 function openLB(node, photoEl){
   const readys = [...node.querySelectorAll('.photo')].filter(el => el._photo?.status === 'ready');
   if(!readys.length) return;
@@ -1287,6 +1450,9 @@ function openLB(node, photoEl){
     date: el.dataset.date
   }));
   idx = Math.max(0, readys.indexOf(photoEl));
+  /* 从这张相纸原来挂着的位置炸开，火花取它自己的主色 */
+  const r = photoEl.getBoundingClientRect();
+  burstAt(r.left + r.width / 2, r.top + r.height * .42, photoEl._photo?.dominant);
   lastFocus = document.activeElement;                 /* 记住来源，关闭时归还焦点 */
   lb.classList.add('on','first-open');
   setTimeout(()=>lb.classList.remove('first-open'), 420);
@@ -1296,6 +1462,7 @@ function openLB(node, photoEl){
   setTimeout(()=>lbCloseBtn.focus(), 0);              /* 焦点移入弹层 */
 }
 function closeLB(){
+  sparkStop();
   lb.classList.remove('on');
   document.documentElement.style.overflow = '';
   viewport.style.transform = '';
