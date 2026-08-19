@@ -15,6 +15,7 @@
     --ivory:#EDE5D8; --muted:#9A8E7E; --faint:#5E564A;
     --amber:#D9A05B; --safelight:#D4553B; --ok:#7FA65A;
     --line:#332D25; --hairline:rgba(51,45,37,.6);
+    --field:#131110; --field-line:#3B332A;   /* 输入框：比面板更暗一档，看得出是可填的槽 */
     --print:#F7F2E8; --paper-raw:#E7DFC9; --print-ink:#4A4238; --print-sub:#8C8172;
     --serif:'Noto Serif SC','Songti SC',serif;
     --sans:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;
@@ -26,6 +27,7 @@
     --ivory:#2E2A24; --muted:#7C7263; --faint:#A89D8B;
     --amber:#8F6A2A; --safelight:#C24A32; --ok:#5E7F3F;
     --line:#DCD4C4; --hairline:rgba(190,178,156,.6);
+    --field:#FFFDF8; --field-line:#D6CCB8;
     --print:#FFFDF8; --paper-raw:#EFE9DA;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
@@ -83,10 +85,15 @@
     70%{transform:translateY(-3px);}100%{transform:translateY(0);}
   }
   button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
-  input,textarea{font:inherit;color:var(--ivory);background:var(--bg-soft);
-    border:1px solid var(--line);border-radius:6px;padding:9px 12px;outline:none;
-    transition:border-color .25s;}
-  input:focus,textarea:focus{border-color:var(--amber);}
+  input,textarea{font:inherit;color:var(--ivory);background:var(--field);
+    border:1px solid var(--field-line);border-radius:8px;padding:9px 12px;outline:none;
+    transition:border-color .25s,box-shadow .25s;}
+  input::placeholder,textarea::placeholder{color:var(--faint);}
+  input:focus,textarea:focus{
+    border-color:var(--amber);box-shadow:0 0 0 3px rgba(217,160,91,.16);
+  }
+  /* 让浏览器按主题渲染原生控件（日期选择器的日历图标、下拉面板、滚动条） */
+  body{color-scheme:dark;} body.light{color-scheme:light;}
   :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:3px;}
   .mono{font-family:var(--mono);}
   .view{display:none;position:relative;z-index:1;}
@@ -233,12 +240,23 @@
     padding:80px 0;text-align:center;}
   .backbtn{display:none;margin-bottom:14px;}
   .d-form{
-    display:grid;grid-template-columns:150px 1fr;gap:12px;max-width:640px;
+    display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px 18px;
     background:var(--panel);border:1px solid var(--hairline);border-radius:12px;
-    padding:18px;
+    padding:20px 22px;
   }
-  .d-form textarea{grid-column:1/-1;resize:vertical;min-height:60px;}
-  .d-form .row2{grid-column:1/-1;display:flex;gap:10px;align-items:center;}
+  .d-form .f{display:flex;flex-direction:column;gap:7px;min-width:0;}
+  .d-form .f.wide{grid-column:1/-1;}
+  .d-form label{
+    font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.2em;
+  }
+  .d-form input,.d-form textarea{width:100%;}
+  .d-form textarea{resize:vertical;min-height:78px;line-height:1.6;}
+  .d-form .row2{
+    grid-column:1/-1;display:flex;gap:10px;align-items:center;
+    padding-top:4px;border-top:1px solid var(--hairline);margin-top:2px;
+  }
+  .d-form .row2 .btn{margin-top:12px;}
+  .d-form .row2 .savemark{margin-top:12px;}
   .savemark{font-family:var(--mono);font-size:11px;color:var(--ok);opacity:0;transition:opacity .4s;}
   .savemark.show{opacity:1;}
 
@@ -484,7 +502,7 @@
     .layout.showDetail .side{display:none;}
     .layout:not(.showDetail) .detail{display:none;}
     .backbtn{display:inline-flex;}
-    .d-form{grid-template-columns:1fr;}
+    .d-form{grid-template-columns:1fr;padding:16px;}
     .topstats{display:none;}
     .grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:14px;}
     .card .ops{opacity:1;}     /* 触屏无 hover，常显 */
@@ -886,9 +904,20 @@ function renderDetail(){
   d.innerHTML = `
     <button class="icon-btn backbtn" id="backList">← 节点列表</button>
     <div class="d-form">
-      <input type="date" id="fDate" value="${esc(n.date)}">
-      <input type="text" id="fTitle" maxlength="120" value="${esc(n.title)}" placeholder="标题">
-      <textarea id="fDesc" maxlength="2000" placeholder="描述">${esc(n.desc)}</textarea>
+      <div class="f">
+        <label for="fDate">日期</label>
+        <input type="date" id="fDate" value="${esc(n.date)}">
+      </div>
+      <div class="f">
+        <label for="fTitle">标题</label>
+        <input type="text" id="fTitle" maxlength="120" value="${esc(n.title)}"
+               placeholder="给这一天起个名字">
+      </div>
+      <div class="f wide">
+        <label for="fDesc">描述</label>
+        <textarea id="fDesc" maxlength="2000"
+                  placeholder="那天发生了什么，留给以后的自己看">${esc(n.desc)}</textarea>
+      </div>
       <div class="row2">
         <button class="btn" id="saveNode">保存节点</button>
         <span class="savemark" id="saved">✓ 已保存</span>
