@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ const usage = `拾光集命令行工具
 
 用法：
   sgctl import <目录> [选项]      批量导入目录下的照片
+  sgctl export <目录> [选项]      把整个相册导出成可读的文件夹
   sgctl version                   显示版本
 
 import 选项：
@@ -45,6 +47,27 @@ import 选项：
   sgctl import ~/Photos --server https://photos.example.com --token $SG_ADMIN_TOKEN
   sgctl import ./老照片 --group folder --dry-run
   sgctl import ./老照片 --emit-manifest      # 先生成清单，改完再导入
+
+export 选项：
+  --server <url>      服务地址（默认 $SG_SERVER，或 http://localhost:8080）
+  --token <token>     管理口令（默认 $SG_ADMIN_TOKEN）
+  --from <date>       只导出这天及以后（YYYY-MM-DD）
+  --to <date>         只导出这天及以前（YYYY-MM-DD）
+  --dry-run           只列出将要导出的文件夹，不下载
+  --timeout <dur>     单次请求超时（默认 5m）
+
+导出的样子（照片是原图，文字就在照片旁边）：
+
+  2019-10-06 小妹的婚礼/
+    shiguang.txt            这个日子的日期、标题、地点、描述
+    01 接亲那天早上.jpg      原图，序号即相册里的顺序
+    01 接亲那天早上.txt      图注、拍摄时间、写在相纸背面的话
+
+这些文件夹可以被 sgctl import --group folder 原样读回来。
+
+示例：
+  sgctl export ~/拾光集备份 --server https://photos.example.com
+  sgctl export ./近三年 --from 2023-01-01 --dry-run
 
 指定日期与文案：在照片目录里放一个 shiguang.txt（可用 --emit-manifest 生成）：
 
@@ -73,6 +96,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n错误：%v\n", err)
 			os.Exit(1)
 		}
+	case "export":
+		if err := runExport(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "\n错误：%v\n", err)
+			os.Exit(1)
+		}
 	case "version", "-v", "--version":
 		fmt.Printf("sgctl %s\n", version)
 	case "help", "-h", "--help":
@@ -81,6 +109,106 @@ func main() {
 		fmt.Fprintf(os.Stderr, "未知命令 %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)
 	}
+}
+
+func runExport(args []string) error {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	var (
+		server  = fs.String("server", envOr("SG_SERVER", "http://localhost:8080"), "")
+		token   = fs.String("token", os.Getenv("SG_ADMIN_TOKEN"), "")
+		from    = fs.String("from", "", "")
+		to      = fs.String("to", "", "")
+		dryRun  = fs.Bool("dry-run", false, "")
+		timeout = fs.Duration("timeout", 5*time.Minute, "")
+	)
+	out, rest := splitPositional(args)
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if out == "" {
+		if fs.NArg() > 0 {
+			out = fs.Arg(0)
+		} else {
+			fs.Usage()
+			return errors.New("请指定导出到哪个目录")
+		}
+	}
+	if *token == "" {
+		return errors.New("缺少管理口令：用 --token 指定，或设置环境变量 SG_ADMIN_TOKEN")
+	}
+	for _, d := range []string{*from, *to} {
+		if d != "" && !exportDateRe.MatchString(d) {
+			return fmt.Errorf("日期要写成 YYYY-MM-DD，收到 %q", d)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	c, err := importer.NewClient(*server, *token, *timeout)
+	if err != nil {
+		return err
+	}
+	if _, err := c.Ping(ctx); err != nil {
+		return fmt.Errorf("连不上服务：%w", err)
+	}
+
+	tty := isTerminal(os.Stdout)
+	last := time.Now()
+	progress := func(dir, file string, done, total int) {
+		if tty {
+			fmt.Printf("\r\033[K  [%d/%d] %s / %s", done+1, total, dir, file)
+			return
+		}
+		if time.Since(last) >= 2*time.Second {
+			last = time.Now()
+			fmt.Printf("  [%d/%d] %s\n", done+1, total, dir)
+		}
+	}
+
+	st, plan, err2 := importer.Export(ctx, c, importer.ExportOptions{
+		OutDir: out, From: *from, To: *to, DryRun: *dryRun,
+	}, progress)
+	if tty {
+		fmt.Print("\r\033[K")
+	}
+	if err2 != nil {
+		return err2
+	}
+
+	if *dryRun {
+		fmt.Printf("将导出 %d 个文件夹、%d 张照片到 %s：\n\n", st.Nodes, st.Photos, out)
+		for _, it := range plan {
+			fmt.Printf("  %-46s %d 张\n", it.Dir, it.Photos)
+		}
+		fmt.Println("\n（--dry-run，未下载任何文件）")
+		return nil
+	}
+	fmt.Printf("导出完成：%d 个文件夹、%d 张照片、%s，用时 %s\n",
+		st.Nodes, st.Photos, humanBytes(st.Bytes), humanDuration(st.Elapsed))
+	if st.Reused > 0 {
+		fmt.Printf("其中 %d 张已经在目录里，这次没有重下\n", st.Reused)
+	}
+	if st.Skipped > 0 {
+		fmt.Printf("跳过 %d 张还没处理完的照片（等它们显影完再跑一次即可）\n", st.Skipped)
+	}
+	fmt.Printf("目录：%s\n", out)
+	return nil
+}
+
+var exportDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 func runImport(args []string) error {

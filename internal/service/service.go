@@ -128,6 +128,7 @@ type PhotoDTO struct {
 	Width      *int64            `json:"width"`
 	Height     *int64            `json:"height"`
 	TakenAt    *string           `json:"taken_at"`
+	SizeBytes  *int64            `json:"size_bytes"`
 	Ord        int64             `json:"ord"`
 	Variants   map[string]string `json:"variants"`
 }
@@ -149,6 +150,7 @@ func (s *Service) photoDTO(ctx context.Context, p *store.Photo) *PhotoDTO {
 		ID:         p.ID,
 		Caption:    p.Caption,
 		Note:       p.Note,
+		SizeBytes:  p.SizeBytes,
 		Status:     p.Status,
 		FailReason: p.FailReason,
 		BlurHash:   p.BlurHash,

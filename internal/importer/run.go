@@ -106,7 +106,7 @@ func Run(ctx context.Context, c *Client, opt Options) (*Result, error) {
 		if ok {
 			res.NodesReused++
 		} else {
-			n, err := c.CreateNode(ctx, g.Date, g.Title, g.Description)
+			n, err := c.CreateNode(ctx, g.Date, g.Title, g.Description, g.Place)
 			if err != nil {
 				mu.Lock()
 				stat.Failed += len(g.Photos)

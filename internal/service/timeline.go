@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"shiguang/internal/blob"
 	"shiguang/internal/store"
 )
 
@@ -146,6 +147,72 @@ func (s *Service) GetNode(ctx context.Context, id string) (*NodeDTO, error) {
 		return nil, err
 	}
 	return s.nodeDTO(ctx, n, photos[id]), nil
+}
+
+// OriginalMeta 是原图下载所需的信息。
+type OriginalMeta struct {
+	Reader      io.ReadCloser
+	Size        int64
+	ContentType string
+	Filename    string // 建议的落地文件名：图注（或 id）+ 原扩展名
+	SHA256      string
+}
+
+// OpenOriginal 打开某张照片的原图（未经重编码的那一份）。
+// 只给管理员用：/img 只服务 var/ 变体，原图不对外。
+func (s *Service) OpenOriginal(ctx context.Context, id string) (*OriginalMeta, error) {
+	p, err := s.st.GetPhoto(ctx, id, false)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if p.SHA256 == nil || p.Ext == nil || p.Status != "ready" {
+		return nil, Validationf("这张照片还没有可导出的原图")
+	}
+	key := blob.OrigKey(*p.SHA256, *p.Ext)
+	rc, err := s.bl.Open(ctx, key)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	size, _ := s.bl.Stat(ctx, key)
+	ct := "application/octet-stream"
+	switch *p.Ext {
+	case "jpg":
+		ct = "image/jpeg"
+	case "png":
+		ct = "image/png"
+	case "webp":
+		ct = "image/webp"
+	}
+	name := strings.TrimSpace(p.Caption)
+	if name == "" {
+		name = p.ID
+	}
+	return &OriginalMeta{
+		Reader: rc, Size: size, ContentType: ct,
+		Filename: safeFilename(name) + "." + *p.Ext,
+		SHA256:   *p.SHA256,
+	}, nil
+}
+
+// safeFilename 把图注收拾成能落地的文件名：去掉路径分隔符与控制字符，
+// 保留中文，长度按字符数截断（不能按字节，会截断出半个汉字）。
+func safeFilename(s string) string {
+	repl := strings.NewReplacer(
+		"/", "_", "\\", "_", ":", "_", "*", "_", "?", "_",
+		"\"", "_", "<", "_", ">", "_", "|", "_", "\n", " ", "\r", " ", "\t", " ")
+	out := strings.TrimSpace(repl.Replace(s))
+	out = strings.Trim(out, ".") // Windows 不接受结尾的点
+	r := []rune(out)
+	if len(r) > 60 {
+		out = string(r[:60])
+	}
+	if out == "" {
+		out = "photo"
+	}
+	return out
 }
 
 // GetPhoto 返回单张照片（状态轮询用）。

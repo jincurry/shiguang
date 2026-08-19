@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 			// 写接口（管理员）
 			api.Group(func(g chi.Router) {
 				g.Use(s.requireAuth)
+				g.Get("/photos/{id}/original", s.handleOriginal)
 				g.Post("/nodes", s.handleCreateNode)
 				g.Patch("/nodes/{id}", s.handlePatchNode)
 				g.Delete("/nodes/{id}", s.handleDeleteNode)
@@ -259,6 +260,28 @@ func (s *Server) handleNodesAtPlace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"place": place, "items": items})
+}
+
+// handleOriginal 下载原图（未经重编码的那一份）。仅管理员：
+// /img 只服务 var/ 变体，orig/ 从不对外，导出走这里。
+func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
+	meta, err := s.svc.OpenOriginal(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	defer meta.Reader.Close()
+	w.Header().Set("Content-Type", meta.ContentType)
+	if meta.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+	}
+	w.Header().Set("ETag", `"`+meta.SHA256+`"`)
+	// 文件名同时给 ASCII 兜底与 UTF-8 版本：中文图注在老客户端上不至于乱码
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="photo"; filename*=UTF-8''`+url.PathEscape(meta.Filename))
+	if _, err := io.Copy(w, meta.Reader); err != nil {
+		s.log.Warn("原图下载中断", "err", err)
+	}
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
