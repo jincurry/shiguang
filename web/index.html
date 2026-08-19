@@ -549,11 +549,21 @@
   /* 相纸背面：老照片背面用铅笔写的那段话 */
   .lb-flip{position:relative;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.35,1);}
   .lb-card.flipped .lb-flip{transform:rotateY(180deg);}
+  /* 两面的显隐不依赖 backface-visibility：那个属性要求元素自身参与 3D
+     变换才可靠，Safari 与部分 Chrome 上只靠父级 preserve-3d 会失效，
+     结果就是翻到背面看见的是镜像的正面。这里改成在翻转过半（纸侧对
+     观众、两面都看不见的那一瞬）硬切换可见性，视觉上完全一致。 */
   .lb-flip>.face,.lb-flip>.lb-back{
     backface-visibility:hidden;-webkit-backface-visibility:hidden;
+    transform:rotateY(0deg);          /* 强制参与 3D，让上面那行有机会生效 */
+    transition:opacity 0s linear .34s,visibility 0s linear .34s;
   }
+  .lb-flip>.lb-back{transform:rotateY(180deg);}
+  .lb-card.flipped .lb-flip>.face{opacity:0;visibility:hidden;pointer-events:none;}
+  .lb-flip>.lb-back{opacity:0;visibility:hidden;pointer-events:none;}
+  .lb-card.flipped .lb-flip>.lb-back{opacity:1;visibility:visible;pointer-events:auto;}
   .lb-back{
-    position:absolute;inset:0;transform:rotateY(180deg);
+    position:absolute;inset:0;
     display:flex;flex-direction:column;
     background:var(--paper-raw);border-radius:2px;
     padding:26px 26px 20px;overflow:hidden;
