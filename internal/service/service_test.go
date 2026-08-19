@@ -292,7 +292,7 @@ func TestCursorPagination(t *testing.T) {
 	cursor := ""
 	pages := 0
 	for {
-		out, err := svc.Timeline(ctx, cursor, 10, true)
+		out, err := svc.Timeline(ctx, cursor, 10, true, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

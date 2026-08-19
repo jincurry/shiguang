@@ -217,6 +217,11 @@
     letter-spacing:.12em;white-space:nowrap;
   }
   .state{display:inline-flex;align-items:center;gap:7px;color:var(--muted);}
+  .kbd-tip{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--faint);
+    margin-left:12px;opacity:0;transition:opacity .25s;
+  }
+  .node.open:focus-within .kbd-tip{opacity:1;}
   .state::before{content:"展开";}
   .node.open .state::before{content:"收起";}
   .plus{
@@ -385,6 +390,15 @@
     50%    {transform:rotate(calc(var(--rot,0deg) + .8deg));}
   }
 
+  /* 空节点与补拉中的占位：展开后不该只剩一条空钢丝 */
+  .strip-note{
+    display:none;padding:26px 4px 10px;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;color:var(--faint);
+  }
+  .node.open.is-empty .strip-note,
+  .node.open .strip-wrap.loading + .strip-note{display:block;}
+  .node.open.is-empty .wire{opacity:.35;}
+
   /* 晾片带左右翻页按钮：只在桌面（可 hover + 精确指针）且确实可滚时浮现 */
   .strip-outer{position:relative;}
   .s-nav{
@@ -502,6 +516,11 @@
     transition:width .3s ease,background-color .3s ease,opacity .3s ease;
   }
   .lb-dots button.act{width:22px;background:var(--amber);opacity:1;}
+  .lb-count{
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--muted);
+    font-variant-numeric:tabular-nums;
+  }
+  .lb-count b{color:var(--amber);font-weight:400;}
   .lb-swipe-hint{
     display:inline-block;margin-left:16px;color:var(--faint);
     transition:opacity .5s ease;
@@ -769,10 +788,11 @@ const autoClose = new IntersectionObserver(es => {
 }, {threshold:0});
 
 /* ================= 渲染时间轴（游标分页增量渲染） ================= */
+const FOLD_N = 6;                     /* 折叠摞露出的张数，与 CSS 的 nth-of-type(n+7) 对齐 */
 const tl = document.getElementById('timeline');
 const yearNav = document.getElementById('yearNav');
 let nextCursor = null, loading = false, firstLoad = true, done = false;
-let seq = 0, lastYear = '';
+let lastYear = '';
 const years = [];
 let yrBtns = [];
 
@@ -784,7 +804,6 @@ function refreshYearNav(){
 }
 
 function buildPhoto(p, date, i){
-  seq++;
   const fig = document.createElement('figure');
   fig.className = 'photo';
   fig.setAttribute('role','button');
@@ -797,7 +816,7 @@ function buildPhoto(p, date, i){
     <span class="clip" aria-hidden="true"></span>
     <div class="print">
       <div class="pic"><span class="ph-img"></span><i class="fail">曝光失败</i></div>
-      <figcaption><i>No.${String(seq).padStart(2,'0')}</i><b></b></figcaption>
+      <figcaption><i>No.${String(i + 1).padStart(2,'0')}</i><b></b></figcaption>
     </div>`;
   fig.querySelector('figcaption b').textContent = p.caption;
   fig.setAttribute('aria-label', '查看：' + p.caption);
@@ -832,6 +851,8 @@ function buildNode(n){
       <div class="strip-wrap">
         <div class="strip"><span class="wire" aria-hidden="true"></span></div>
       </div>
+      <span class="kbd-tip" aria-hidden="true">← → 翻看 · Enter 看大图</span>
+      <p class="strip-note" aria-live="polite"></p>
       <button class="s-nav s-prev" aria-label="向左翻看照片">‹</button>
       <button class="s-nav s-next" aria-label="向右翻看照片">›</button>
     </div>`;
@@ -839,16 +860,74 @@ function buildNode(n){
   art.querySelector('.node-title').textContent = n.title;
   art.querySelector('.pcount').textContent = '×' + n.photo_count;
   art.querySelector('.node-desc').textContent = n.description;
+  art.dataset.id = n.id;
+  art._total = n.photo_count;          /* 真实总数：首屏只发了前几张 */
+  if(!n.photo_count) art.classList.add('is-empty');
+  art.querySelector('.strip-note').textContent = n.photo_count ? '正在取出相纸……' : '这一天还没有照片';
+  art._date = n.date;
   const strip = art.querySelector('.strip');
   n.photos.forEach((p, i) => strip.appendChild(buildPhoto(p, n.date, i)));
-  art.querySelectorAll('.photo').forEach(p => {
-    p.style.setProperty('--rot',  (Math.random() * 2.6 - 1.3).toFixed(2) + 'deg');
-    p.style.setProperty('--clipx',(Math.random() * 22  - 11 ).toFixed(0) + 'px');
-    p.style.setProperty('--d',    ((+p.dataset.i) * .05 + .18).toFixed(2) + 's');
-  });
+  scatter(art.querySelectorAll('.photo'));
   bindNode(art);
   observeReveal(art);
   tl.appendChild(art);
+}
+
+/* 每张相纸挂上晾片线的角度、木夹位置、入场延迟都带点随机，避免排得像标本 */
+function scatter(photos){
+  photos.forEach(p => {
+    p.style.setProperty('--rot',  (Math.random() * 2.6 - 1.3).toFixed(2) + 'deg');
+    p.style.setProperty('--clipx',(Math.random() * 22  - 11 ).toFixed(0) + 'px');
+    p.style.setProperty('--d',    (Math.min(+p.dataset.i, 12) * .05 + .18).toFixed(2) + 's');
+  });
+}
+
+/* 展开时补齐照片：首屏每个节点只发了 FOLD_N 张，其余按 id 拉全节点。
+   同一节点重复触发共用一个 in-flight Promise。 */
+function ensureAllPhotos(node){
+  if(node._full) return Promise.resolve();
+  if(node.querySelectorAll('.photo').length >= (node._total || 0)){
+    node._full = true;
+    return Promise.resolve();
+  }
+  if(node._loading) return node._loading;
+  node._loading = fetch(`${API}/nodes/${encodeURIComponent(node.dataset.id)}`)
+    .then(res => { if(!res.ok) throw new Error(String(res.status)); return res.json(); })
+    .then(n => {
+      const strip = node.querySelector('.strip');
+      strip.querySelectorAll('.photo').forEach(el => el.remove());
+      n.photos.forEach((p, i) => strip.appendChild(buildPhoto(p, n.date, i)));
+      scatter(strip.querySelectorAll('.photo'));
+      node._full = true;
+      node._total = n.photos.length;
+    })
+    .finally(() => { node._loading = null; });
+  return node._loading;
+}
+
+/* 横向懒加载：只显影滚进晾片带视口（含左右各一屏预取）的相纸。
+   一个 192 张的节点展开时不该一次发 192 个缩略图请求。 */
+function stripLazy(node){
+  const wrap = node.querySelector('.strip-wrap');
+  if(node._stripIO) node._stripIO.disconnect();
+  node._stripIO = new IntersectionObserver(es => {
+    es.forEach(en => {
+      if(!en.isIntersecting) return;
+      develop(en.target);
+      node._stripIO.unobserve(en.target);
+    });
+  }, {root: wrap, rootMargin: '0px 100%'});
+  node.querySelectorAll('.photo').forEach(el => node._stripIO.observe(el));
+}
+
+/* 晾片带用 roving tabindex：整条带在 Tab 序列里只占一格，带内靠方向键移动。
+   192 张照片全部可 Tab 的话，键盘用户要按 192 次才能走过一个节点。 */
+function roving(node, target){
+  const ps = [...node.querySelectorAll('.photo')];
+  if(!ps.length) return null;
+  const el = target && ps.includes(target) ? target : ps[0];
+  ps.forEach(p => p.tabIndex = p === el ? 0 : -1);
+  return el;
 }
 
 /* 节点展开 / 收起 + 桌面端按住拖动横滚 */
@@ -858,12 +937,28 @@ function bindNode(node){
   const toggle = () => {
     const open = node.classList.toggle('open');
     head.setAttribute('aria-expanded', open);
-    node.querySelectorAll('.photo').forEach(p => p.tabIndex = open ? 0 : -1);
+    if(open) roving(node);
+    else node.querySelectorAll('.photo').forEach(p => p.tabIndex = -1);
     node._updateNav?.();
     if(open){
       wrap.scrollLeft = 0;
+      /* 钢丝先拉开，照片补齐后再挂上；只显影滚到眼前的那几张 */
+      const full = ensureAllPhotos(node);
+      if(node._loading) wrap.classList.add('loading');
+      full.then(() => {
+        wrap.classList.remove('loading');
+        node.classList.toggle('is-empty', !node.querySelector('.photo'));
+        if(!node.classList.contains('open')) return;
+        roving(node);
+        stripLazy(node);
+        node._updateNav?.();
+      }).catch(() => {
+        wrap.classList.remove('loading');
+        node.querySelector('.strip-note').textContent = '照片加载失败，收起再展开可重试';
+        node.classList.add('is-empty');
+        stripLazy(node);
+      });
       setTimeout(() => node._updateNav?.(), 700);   /* 等 margin 过渡结束宽度定型 */
-      node.querySelectorAll('.photo').forEach(p => develop(p));   /* 展开即全部显影 */
       const wire = node.querySelector('.wire');
       if(wire) wire.style.transformOrigin = (wrap.clientWidth / 2) + 'px 50%';
       requestAnimationFrame(() => {
@@ -941,7 +1036,10 @@ async function loadPage(){
   if(loading || done) return;
   loading = true;
   try{
-    const q = nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}&limit=10` : '?limit=10';
+    /* photo_limit：首屏每节点只取折叠摞露出的那几张，展开时再按 id 拉全部。
+       几百张的节点整摞下发会让首屏 JSON 涨到几百 KB。 */
+    const q = (nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}&limit=10` : '?limit=10')
+      + `&photo_limit=${FOLD_N}`;
     const res = await fetch(API + '/timeline' + q);
     if(!res.ok) throw new Error(String(res.status));
     const data = await res.json();
@@ -1072,7 +1170,16 @@ function parallax(px){
   fs[1].style.transform = `rotate(${-4*t}deg) scale(${1-.06*Math.abs(t)})`;
   fs[2].style.transform = `rotate(${ 4*(1-p2)}deg) scale(${.94+.06*p2})`;
 }
+const DOTS_MAX = 12;                  /* 再多就铺不下，改用计数 */
 function renderDots(){
+  if(album.length > DOTS_MAX){
+    lbDots.innerHTML = '';
+    const c = document.createElement('span');
+    c.className = 'lb-count';
+    c.textContent = `${idx + 1} / ${album.length}`;
+    lbDots.appendChild(c);
+    return;
+  }
   lbDots.innerHTML = album.map((_,i)=>
     `<button class="${i===idx?'act':''}" aria-label="第 ${i+1} 张，共 ${album.length} 张"></button>`).join('');
 }
@@ -1307,8 +1414,21 @@ document.addEventListener('keydown', e=>{
       else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
       else if(!lb.contains(document.activeElement)){ e.preventDefault(); first.focus(); }
     }
-  } else if(e.key==='Enter' && document.activeElement?.classList.contains('photo')){
-    document.activeElement.click();
+  } else if(document.activeElement?.classList.contains('photo')){
+    const cur = document.activeElement, nd = cur.closest('.node');
+    if(e.key==='Enter' || e.key===' '){ e.preventDefault(); cur.click(); return; }
+    const ps = [...nd.querySelectorAll('.photo')], i = ps.indexOf(cur);
+    let t = null;
+    if(e.key==='ArrowRight')     t = ps[Math.min(i + 1, ps.length - 1)];
+    else if(e.key==='ArrowLeft') t = ps[Math.max(i - 1, 0)];
+    else if(e.key==='Home')      t = ps[0];
+    else if(e.key==='End')       t = ps[ps.length - 1];
+    if(t && t !== cur){
+      e.preventDefault();
+      roving(nd, t); t.focus({preventScroll:true}); develop(t);
+      t.scrollIntoView({block:'nearest', inline:'center',
+                        behavior: reduceMotion ? 'auto' : 'smooth'});
+    }
   }
 });
 addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); });

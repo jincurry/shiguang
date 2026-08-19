@@ -165,7 +165,18 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	// include_photos=false：只要节点元数据（后台左栏用）
 	withPhotos := r.URL.Query().Get("include_photos") != "false"
-	out, err := s.svc.Timeline(r.Context(), r.URL.Query().Get("cursor"), limit, withPhotos)
+	// photo_limit=N：每个节点最多带 N 张照片（photo_count 仍是真实总数），
+	// 前台首屏只取折叠摞露出的那几张，展开时再按 id 拉全节点
+	photoLimit := 0
+	if v := r.URL.Query().Get("photo_limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "photo_limit 取值 1-200")
+			return
+		}
+		photoLimit = n
+	}
+	out, err := s.svc.Timeline(r.Context(), r.URL.Query().Get("cursor"), limit, withPhotos, photoLimit)
 	if err != nil {
 		writeServiceError(w, err)
 		return
