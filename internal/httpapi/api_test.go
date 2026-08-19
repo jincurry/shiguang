@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -684,5 +685,86 @@ func TestTimelinePhotoLimit(t *testing.T) {
 	res, _ := doJSON(t, "GET", ts.URL+"/api/v1/timeline?photo_limit=0", testToken, nil)
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("photo_limit=0 should be rejected, got %d", res.StatusCode)
+	}
+}
+
+// TestNoteAndPlace 相纸背面的手记与节点地点：写入、越界拒绝、随读接口返回。
+func TestNoteAndPlace(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-05-05", "title": "N", "place": "外婆家"})
+	nodeID, _ := node["id"].(string)
+	if node["place"] != "外婆家" {
+		t.Fatalf("place should be stored on create: %v", node["place"])
+	}
+	var jb bytes.Buffer
+	jpeg.Encode(&jb, image.NewRGBA(image.Rect(0, 0, 10, 10)), nil)
+	photoID := uploadTestPhoto(t, ts, nodeID, "a.jpg", jb.Bytes())
+
+	_, got := doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+photoID, testToken,
+		map[string]string{"note": "那天下山下到一半开始下雨。"})
+	if got["note"] != "那天下山下到一半开始下雨。" {
+		t.Errorf("note not saved: %v", got["note"])
+	}
+
+	// 超长手记按字数（而非字节）判定
+	res, _ := doJSON(t, "PATCH", ts.URL+"/api/v1/photos/"+photoID, testToken,
+		map[string]string{"note": strings.Repeat("字", 2001)})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("over-long note should be rejected, got %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, "PATCH", ts.URL+"/api/v1/nodes/"+nodeID, testToken,
+		map[string]string{"place": strings.Repeat("地", 81)})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("over-long place should be rejected, got %d", res.StatusCode)
+	}
+
+	// 读接口带出 note 与 place
+	_, tl := doJSON(t, "GET", ts.URL+"/api/v1/timeline", testToken, nil)
+	it := tl["items"].([]any)[0].(map[string]any)
+	if it["place"] != "外婆家" {
+		t.Errorf("timeline should carry place: %v", it["place"])
+	}
+	ph := it["photos"].([]any)[0].(map[string]any)
+	if ph["note"] != "那天下山下到一半开始下雨。" {
+		t.Errorf("timeline should carry note: %v", ph["note"])
+	}
+
+	// 地点索引与串联
+	_, pl := doJSON(t, "GET", ts.URL+"/api/v1/places", testToken, nil)
+	items, _ := pl["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["place"] != "外婆家" {
+		t.Errorf("places index: %v", pl)
+	}
+	_, at := doJSON(t, "GET", ts.URL+"/api/v1/places/"+url.PathEscape("外婆家"), testToken, nil)
+	if n := len(at["items"].([]any)); n != 1 {
+		t.Errorf("nodes at place: want 1, got %d", n)
+	}
+}
+
+// TestOnThisDay 往年同一天：命中月日相同的其它年份，排除当年。
+func TestOnThisDay(t *testing.T) {
+	ts := newTestServer(t, 30)
+	for _, d := range []string{"2019-08-19", "2022-08-19", "2026-08-19", "2022-08-20"} {
+		doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+			map[string]string{"date": d, "title": d})
+	}
+	_, out := doJSON(t, "GET", ts.URL+"/api/v1/on-this-day?date=2026-08-19", testToken, nil)
+	items, _ := out["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("want 2 past years, got %d: %v", len(items), out)
+	}
+	first := items[0].(map[string]any)
+	if first["node"].(map[string]any)["date"] != "2022-08-19" {
+		t.Errorf("most recent should come first: %v", first["node"])
+	}
+	if int(first["years_ago"].(float64)) != 4 {
+		t.Errorf("years_ago: want 4, got %v", first["years_ago"])
+	}
+	// 当年的今天不能出现在结果里
+	for _, it := range items {
+		if d := it.(map[string]any)["node"].(map[string]any)["date"]; d == "2026-08-19" {
+			t.Errorf("current year must be excluded, got %v", d)
+		}
 	}
 }

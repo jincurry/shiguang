@@ -13,17 +13,18 @@ type Node struct {
 	Date        string // YYYY-MM-DD
 	Title       string
 	Description string
+	Place       string // 手填地点：相册在时间之外的第二条线索
 	CreatedAt   string
 	UpdatedAt   string
 	DeletedAt   *string
 	PhotoCount  int // 联查得出（仅存活照片）
 }
 
-const nodeCols = "id, date, title, description, created_at, updated_at, deleted_at"
+const nodeCols = "id, date, title, description, place, created_at, updated_at, deleted_at"
 
 func scanNode(row interface{ Scan(...any) error }) (*Node, error) {
 	var n Node
-	if err := row.Scan(&n.ID, &n.Date, &n.Title, &n.Description,
+	if err := row.Scan(&n.ID, &n.Date, &n.Title, &n.Description, &n.Place,
 		&n.CreatedAt, &n.UpdatedAt, &n.DeletedAt); err != nil {
 		return nil, err
 	}
@@ -33,9 +34,9 @@ func scanNode(row interface{ Scan(...any) error }) (*Node, error) {
 // CreateNode 插入节点。
 func (s *Store) CreateNode(ctx context.Context, n *Node) error {
 	_, err := s.writer.ExecContext(ctx,
-		`INSERT INTO nodes (id, date, title, description, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?)`,
-		n.ID, n.Date, n.Title, n.Description, n.CreatedAt, n.UpdatedAt)
+		`INSERT INTO nodes (id, date, title, description, place, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?)`,
+		n.ID, n.Date, n.Title, n.Description, n.Place, n.CreatedAt, n.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("store: create node: %w", err)
 	}
@@ -66,11 +67,11 @@ func (s *Store) GetNode(ctx context.Context, id string, includeDeleted bool) (*N
 }
 
 // UpdateNode 更新节点字段（date/title/description 全量传入）。
-func (s *Store) UpdateNode(ctx context.Context, id, date, title, description, now string) error {
+func (s *Store) UpdateNode(ctx context.Context, id, date, title, description, place, now string) error {
 	res, err := s.writer.ExecContext(ctx,
-		`UPDATE nodes SET date=?, title=?, description=?, updated_at=?
+		`UPDATE nodes SET date=?, title=?, description=?, place=?, updated_at=?
 		 WHERE id=? AND deleted_at IS NULL`,
-		date, title, description, now, id)
+		date, title, description, place, now, id)
 	if err != nil {
 		return fmt.Errorf("store: update node: %w", err)
 	}
@@ -183,6 +184,70 @@ func (s *Store) PhotosByNodeIDs(ctx context.Context, nodeIDs []string) (map[stri
 			return nil, fmt.Errorf("store: photos scan: %w", err)
 		}
 		out[p.NodeID] = append(out[p.NodeID], p)
+	}
+	return out, rows.Err()
+}
+
+// NodesByPlace 取同一地点的全部存活节点（时间倒序）——相册在时间之外的第二条线索。
+func (s *Store) NodesByPlace(ctx context.Context, place string, limit int) ([]*Node, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT `+nodeCols+` FROM nodes
+		 WHERE deleted_at IS NULL AND place = ?
+		 ORDER BY date DESC, id DESC LIMIT ?`, place, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: nodes by place: %w", err)
+	}
+	defer rows.Close()
+	var out []*Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: nodes by place scan: %w", err)
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// Places 列出用过的地点及各自的节点数（时间轴上做地点索引用）。
+func (s *Store) Places(ctx context.Context) (map[string]int, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT place, COUNT(*) FROM nodes
+		 WHERE deleted_at IS NULL AND place <> ''
+		 GROUP BY place ORDER BY COUNT(*) DESC, place`)
+	if err != nil {
+		return nil, fmt.Errorf("store: places: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var pl string
+		var n int
+		if err := rows.Scan(&pl, &n); err != nil {
+			return nil, fmt.Errorf("store: places scan: %w", err)
+		}
+		out[pl] = n
+	}
+	return out, rows.Err()
+}
+
+// NodesOnMonthDay 取往年同一天（月-日相同）的节点，今年的除外——「那年今日」。
+func (s *Store) NodesOnMonthDay(ctx context.Context, monthDay, exceptYear string, limit int) ([]*Node, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT `+nodeCols+` FROM nodes
+		 WHERE deleted_at IS NULL AND substr(date, 6) = ? AND substr(date, 1, 4) <> ?
+		 ORDER BY date DESC LIMIT ?`, monthDay, exceptYear, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: nodes on month-day: %w", err)
+	}
+	defer rows.Close()
+	var out []*Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: month-day scan: %w", err)
+		}
+		out = append(out, n)
 	}
 	return out, rows.Err()
 }

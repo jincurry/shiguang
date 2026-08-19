@@ -120,6 +120,7 @@ func (s *Service) variantURL(ctx context.Context, sha, name string) (string, err
 type PhotoDTO struct {
 	ID         string            `json:"id"`
 	Caption    string            `json:"caption"`
+	Note       string            `json:"note"` // 相纸背面的手记
 	Status     string            `json:"status"`
 	FailReason *string           `json:"fail_reason"`
 	BlurHash   *string           `json:"blurhash"`
@@ -137,6 +138,7 @@ type NodeDTO struct {
 	Date        string      `json:"date"`
 	Title       string      `json:"title"`
 	Description string      `json:"description"`
+	Place       string      `json:"place"`
 	PhotoCount  int         `json:"photo_count"`
 	Photos      []*PhotoDTO `json:"photos"`
 }
@@ -146,6 +148,7 @@ func (s *Service) photoDTO(ctx context.Context, p *store.Photo) *PhotoDTO {
 	d := &PhotoDTO{
 		ID:         p.ID,
 		Caption:    p.Caption,
+		Note:       p.Note,
 		Status:     p.Status,
 		FailReason: p.FailReason,
 		BlurHash:   p.BlurHash,
@@ -175,6 +178,7 @@ func (s *Service) nodeDTO(ctx context.Context, n *store.Node, photos []*store.Ph
 		Date:        n.Date,
 		Title:       n.Title,
 		Description: n.Description,
+		Place:       n.Place,
 		Photos:      make([]*PhotoDTO, 0, len(photos)),
 	}
 	for _, p := range photos {

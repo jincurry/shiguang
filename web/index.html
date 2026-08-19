@@ -160,6 +160,39 @@
     border-radius:3px;opacity:.8;
   }
 
+  /* ============ 那年今日 ============ */
+  .onthisday{
+    margin-top:30px;display:none;
+    border:1px solid var(--line);border-radius:14px;
+    background:linear-gradient(180deg,rgba(212,85,59,.07),rgba(212,85,59,.02));
+    padding:16px 18px;
+  }
+  .onthisday.on{display:block;animation:otdIn .8s ease .4s backwards;}
+  @keyframes otdIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;}}
+  .otd-head{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.26em;color:var(--safelight);
+    display:flex;align-items:center;gap:10px;margin-bottom:12px;
+  }
+  .otd-head::after{content:"";flex:1;height:1px;background:var(--line);}
+  .otd-list{display:flex;gap:12px;overflow-x:auto;padding-bottom:2px;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+  .otd-item{
+    flex:none;display:flex;align-items:center;gap:11px;text-align:left;
+    border:1px solid var(--line);border-radius:11px;padding:8px 14px 8px 8px;
+    background:var(--bg-soft);
+    transition:border-color .25s,transform .25s;
+  }
+  .otd-item:hover{border-color:var(--amber);transform:translateY(-2px);}
+  .otd-thumb{
+    width:46px;height:46px;border-radius:6px;flex:none;
+    background:var(--paper-raw) center/cover;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);
+  }
+  .otd-when{font-family:var(--mono);font-size:10.5px;color:var(--amber);letter-spacing:.1em;}
+  .otd-title{font-family:var(--serif);font-weight:600;font-size:15px;letter-spacing:.04em;
+    white-space:nowrap;max-width:15em;overflow:hidden;text-overflow:ellipsis;}
+  .otd-sub{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.08em;}
+
   /* ============ 时间轴 ============ */
   main{padding:26px 0 120px;}
   .timeline{position:relative;padding-left:40px;}
@@ -193,6 +226,11 @@
     contain-intrinsic-size:auto 340px;
   }
   .node + .node{border-top:1px solid var(--hairline);}
+  .node.flash{animation:nodeFlash 1.6s ease;}
+  @keyframes nodeFlash{
+    0%,100%{background:transparent;}
+    18%{background:rgba(217,160,91,.1);}
+  }
   .node::before{
     content:"";position:absolute;left:-35px;top:47px;
     width:8px;height:8px;border-radius:50%;
@@ -232,6 +270,52 @@
   }
   .node.open .plus{transform:rotate(225deg);border-color:var(--amber);}
   .node-desc{margin-top:4px;color:var(--muted);font-size:14px;max-width:46em;}
+  /* 地点：时间之外的第二条线索 */
+  .node-place{
+    display:inline-flex;align-items:center;gap:5px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+    color:var(--amber);border:1px solid rgba(217,160,91,.32);
+    border-radius:20px;padding:2px 10px;margin-top:8px;
+    transition:background .25s,border-color .25s,color .25s;
+  }
+  .node-place:hover{background:rgba(217,160,91,.12);border-color:var(--amber);}
+  .node-place i{font-style:normal;opacity:.8;}
+  .node[data-place=""] .node-place{display:none;}
+
+  /* 地点里的其它日子 */
+  .placebox{
+    position:fixed;inset:0;z-index:96;display:none;
+    align-items:center;justify-content:center;padding:24px;
+    background:rgba(14,12,10,.78);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  }
+  body.light .placebox{background:rgba(243,238,228,.86);}
+  .placebox.on{display:flex;}
+  .placebox .box{
+    width:min(460px,94vw);max-height:76vh;display:flex;flex-direction:column;
+    background:var(--bg-soft);border:1px solid var(--line);border-radius:14px;
+    padding:22px;box-shadow:0 30px 70px rgba(0,0,0,.5);
+  }
+  .placebox h4{font-family:var(--serif);font-size:19px;letter-spacing:.06em;
+    display:flex;align-items:baseline;gap:10px;}
+  .placebox h4 span{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.14em;}
+  .place-list{margin-top:16px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+  .place-row{
+    display:flex;align-items:center;gap:12px;text-align:left;
+    padding:9px 10px;border-radius:10px;border:1px solid transparent;
+    transition:background .2s,border-color .2s;
+  }
+  .place-row:hover{background:var(--bg);border-color:var(--line);}
+  .place-row .th{width:40px;height:40px;border-radius:5px;flex:none;
+    background:var(--paper-raw) center/cover;box-shadow:0 2px 5px rgba(0,0,0,.4);}
+  .place-row .d{font-family:var(--mono);font-size:10.5px;color:var(--amber);}
+  .place-row .t{font-family:var(--serif);font-weight:600;font-size:15px;}
+  .place-row .c{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);}
+  .placebox .close{margin-top:16px;align-self:flex-end;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;color:var(--muted);
+    padding:6px 12px;border:1px solid var(--line);border-radius:8px;}
+  .placebox .close:hover{color:var(--ivory);border-color:var(--muted);}
 
   /* ============ 晾片区 ============ */
   .strip-wrap{
@@ -460,7 +544,62 @@
     padding:14px 14px 0;
     box-shadow:0 40px 90px rgba(0,0,0,.6);
     will-change:transform;
+    position:relative;
   }
+  /* 相纸背面：老照片背面用铅笔写的那段话 */
+  .lb-flip{position:relative;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.35,1);}
+  .lb-card.flipped .lb-flip{transform:rotateY(180deg);}
+  .lb-flip>.face{backface-visibility:hidden;-webkit-backface-visibility:hidden;}
+  .lb-back{
+    position:absolute;inset:0;transform:rotateY(180deg);
+    display:flex;flex-direction:column;
+    background:var(--paper-raw);border-radius:2px;
+    padding:26px 26px 20px;overflow:hidden;
+  }
+  .lb-back::after{                       /* 背面也有纸纹 */
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:var(--grain);opacity:.2;mix-blend-mode:multiply;
+  }
+  .lb-back .stamp{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;
+    color:#9C8F79;border-bottom:1px dashed rgba(120,105,80,.35);
+    padding-bottom:8px;margin-bottom:14px;
+    display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;
+  }
+  .lb-back .stamp em{font-style:normal;color:#7C6E58;}
+  .lb-back .hand{
+    flex:1;overflow-y:auto;min-height:0;
+    font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
+    font-size:16.5px;line-height:2;color:#5A4F3E;
+    white-space:pre-wrap;word-break:break-word;
+    /* 铅笔写在纸上：字略微倾斜、颜色偏灰 */
+    transform:rotate(-.4deg);
+  }
+  .lb-back .hand.empty{color:#A2957E;font-family:var(--mono);font-size:12px;
+    letter-spacing:.12em;transform:none;}
+  .lb-back .sign{
+    margin-top:12px;text-align:right;
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:#A2957E;
+  }
+  /* 翻面按钮：压在相纸右下角，像一个纸角 */
+  .lb-flipbtn{
+    position:absolute;right:14px;bottom:60px;z-index:4;
+    display:inline-flex;align-items:center;gap:6px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+    color:var(--print-sub);background:rgba(255,255,255,.82);
+    border:1px solid rgba(120,105,80,.25);border-radius:20px;padding:5px 12px;
+    transition:color .2s,border-color .2s,background .2s;
+  }
+  .lb-flipbtn:hover{color:var(--print-ink);border-color:rgba(120,105,80,.5);background:#fff;}
+  .lb-flipbtn .dot{
+    width:5px;height:5px;border-radius:50%;background:var(--safelight);
+    display:none;                        /* 有手记时才亮这颗点 */
+  }
+  .lb-flipbtn.has .dot{display:block;}
+  .lb-card.flipped .lb-flipbtn{background:rgba(240,233,218,.9);}
+  /* 左右两张是预备位，在屏幕外；它们的翻面按钮不该存在，
+     否则 Tab 会聚焦到看不见的按钮上 */
+  .lb-card:not(:nth-child(2)) .lb-flipbtn{display:none;}
   body.light .lb-frame{box-shadow:0 30px 70px rgba(90,75,55,.35);}
   .lb-card:first-child .lb-frame{transform:rotate(-9deg) scale(.86);}
   .lb-card:last-child  .lb-frame{transform:rotate(9deg) scale(.86);}
@@ -519,6 +658,7 @@
   }
   .lb-bar b{font-family:var(--serif);font-size:16px;font-weight:600;letter-spacing:.04em;}
   .lb-bar span{font-family:var(--mono);font-size:11.5px;color:var(--print-sub);letter-spacing:.08em;}
+  .lb-bar .lb-place{color:#9A7B45;}
 
   .lb-nav{
     position:absolute;top:50%;transform:translateY(-50%);z-index:2;
@@ -567,6 +707,8 @@
     display:inline-block;margin-left:16px;color:var(--faint);
     transition:opacity .5s ease;
   }
+  .lb-flip-hint{display:none;margin-left:16px;color:var(--faint);}
+  @media (hover:hover){.lb-flip-hint{display:inline-block;}}
   .lb-footer.hide-hint .lb-swipe-hint{opacity:0;}
   @media (hover:hover){.lb-swipe-hint{display:none;}}
 
@@ -672,6 +814,7 @@
       <span class="stats" id="stats"></span>
     </div>
     <div class="sprocket intro i5" aria-hidden="true"></div>
+    <section class="onthisday" id="onThisDay" aria-label="那年今日"></section>
   </header>
 
   <main>
@@ -691,9 +834,17 @@
   <div class="lb-footer" id="lbFooter">
     <span class="lb-dots" id="lbDots" aria-label="相册页码"></span>
     <span class="lb-swipe-hint">滑动切换 · 下滑关闭 · 双击放大</span>
+    <span class="lb-flip-hint">F 翻到背面</span>
   </div>
 </div>
 <button class="totop" id="toTop" aria-label="回到顶部" title="回到最近的日子">↑</button>
+<div class="placebox" id="placeBox" role="dialog" aria-modal="true" aria-label="这个地点的其它日子">
+  <div class="box">
+    <h4 id="placeTitle"></h4>
+    <div class="place-list" id="placeList"></div>
+    <button class="close" id="placeClose">关闭</button>
+  </div>
+</div>
 <span class="sr-only" id="lbLive" aria-live="polite"></span>
 
 <script>
@@ -911,6 +1062,7 @@ function buildNode(n){
       <span class="node-meta"><span class="pcount"></span><span class="state"><span class="plus">＋</span></span></span>
     </button>
     <p class="node-desc"></p>
+    <button class="node-place" type="button"><i aria-hidden="true">◎</i><span></span></button>
     <div class="strip-outer">
       <div class="strip-wrap">
         <div class="strip"><span class="wire" aria-hidden="true"></span></div>
@@ -924,6 +1076,8 @@ function buildNode(n){
   art.querySelector('.node-title').textContent = n.title;
   art.querySelector('.pcount').textContent = '×' + n.photo_count;
   art.querySelector('.node-desc').textContent = n.description;
+  art.dataset.place = n.place || '';
+  if(n.place) art.querySelector('.node-place span').textContent = n.place;
   art.dataset.id = n.id;
   art._total = n.photo_count;          /* 真实总数：首屏只发了前几张 */
   if(!n.photo_count) art.classList.add('is-empty');
@@ -1121,6 +1275,114 @@ function bindNode(node){
   autoClose.observe(wrap);
 }
 
+/* ================= 地点：同一处的其它日子 ================= */
+const placeBox = document.getElementById('placeBox');
+const placeList = document.getElementById('placeList');
+document.getElementById('placeClose').addEventListener('click', () => closePlace());
+placeBox.addEventListener('click', e => { if(e.target === placeBox) closePlace(); });
+function closePlace(){ placeBox.classList.remove('on'); }
+
+async function openPlace(place){
+  document.getElementById('placeTitle').textContent = '';
+  const h = document.getElementById('placeTitle');
+  h.append(place);
+  const sp = document.createElement('span'); sp.textContent = '同一处的日子';
+  h.append(sp);
+  placeList.textContent = '正在翻找……';
+  placeBox.classList.add('on');
+  try{
+    const res = await fetch(`${API}/places/${encodeURIComponent(place)}`);
+    if(!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    placeList.textContent = '';
+    if(!data.items.length){ placeList.textContent = '这里还没有别的日子'; return; }
+    data.items.forEach(n => {
+      const b = document.createElement('button');
+      b.className = 'place-row';
+      b.dataset.date = n.date;
+      const th = document.createElement('span');
+      th.className = 'th';
+      const cover = n.photos?.[0]?.variants?.thumb;
+      if(cover) th.style.backgroundImage = `url('${cover}')`;
+      const wrap = document.createElement('span');
+      const d = document.createElement('span'); d.className = 'd'; d.textContent = n.date;
+      const t = document.createElement('span'); t.className = 't'; t.textContent = ' ' + n.title;
+      wrap.append(d, t);
+      const c = document.createElement('span'); c.className = 'c'; c.textContent = '×' + n.photo_count;
+      b.append(th, wrap, c);
+      b.addEventListener('click', () => jumpToNode(n.id, n.date));
+      placeList.appendChild(b);
+    });
+  }catch(_){
+    placeList.textContent = '没能翻出来，稍后再试';
+  }
+}
+
+/* 跳到某个节点：已在页面上就滚过去，否则一路翻页找到它 */
+async function jumpToNode(id, date){
+  closePlace();
+  let el = tl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+  let guard = 0;
+  while(!el && !done && guard++ < 30){
+    await loadPage();
+    el = tl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+  }
+  if(!el){ return; }
+  el.scrollIntoView({behavior: reduceMotion ? 'auto' : 'smooth', block: 'center'});
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1600);
+  if(!el.classList.contains('open')) el.querySelector('.node-head').click();
+}
+
+document.addEventListener('click', e => {
+  const pb = e.target.closest('.node-place');
+  if(pb){ openPlace(pb.closest('.node').dataset.place); }
+});
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && placeBox.classList.contains('on')) closePlace();
+});
+
+/* ================= 那年今日 ================= */
+async function loadOnThisDay(){
+  const box = document.getElementById('onThisDay');
+  try{
+    const today = new Date();
+    const ymd = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    const res = await fetch(`${API}/on-this-day?date=${ymd}`);
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!data.items?.length) return;
+    const head = document.createElement('div');
+    head.className = 'otd-head';
+    head.textContent = '那年今日';
+    const list = document.createElement('div');
+    list.className = 'otd-list';
+    data.items.forEach(it => {
+      const b = document.createElement('button');
+      b.className = 'otd-item';
+      const th = document.createElement('span');
+      th.className = 'otd-thumb';
+      if(it.cover_thumb) th.style.backgroundImage = `url('${it.cover_thumb}')`;
+      const col = document.createElement('span');
+      const when = document.createElement('span');
+      when.className = 'otd-when';
+      when.textContent = it.years_ago > 0 ? `${it.years_ago} 年前的今天` : it.node.date;
+      const t = document.createElement('span');
+      t.className = 'otd-title'; t.textContent = it.node.title;
+      const sub = document.createElement('span');
+      sub.className = 'otd-sub';
+      sub.textContent = (it.node.place ? it.node.place + ' · ' : '') + '×' + it.node.photo_count;
+      col.style.display = 'flex'; col.style.flexDirection = 'column';
+      col.append(when, t, sub);
+      b.append(th, col);
+      b.addEventListener('click', () => jumpToNode(it.node.id, it.node.date));
+      list.appendChild(b);
+    });
+    box.append(head, list);
+    box.classList.add('on');
+  }catch(_){}
+}
+
 /* 无限滚动：底部哨兵 + next_cursor */
 const sentinel = document.createElement('div');
 sentinel.style.height = '1px';
@@ -1228,8 +1490,24 @@ const lbRGB = ()=> document.body.classList.contains('light') ? '243,238,228' : '
 const cardHTML = p => `
   <div class="lb-card">
     <figure class="lb-frame">
-      <div class="lb-zoom"><div class="lb-pic" data-lg="${esc(p.lg)}" style="background-image:url('${esc(p.md)}')"></div></div>
-      <figcaption class="lb-bar"><b>${esc(p.cap)}</b><span>${esc(p.date)}</span></figcaption>
+      <div class="lb-flip">
+        <div class="face">
+          <div class="lb-zoom"><div class="lb-pic" data-lg="${esc(p.lg)}" style="background-image:url('${esc(p.md)}')"></div></div>
+          <figcaption class="lb-bar"><b>${esc(p.cap)}</b><span>${esc(p.date)}</span>${
+            p.place ? `<span class="lb-place">◎ ${esc(p.place)}</span>` : ''}</figcaption>
+        </div>
+        <div class="lb-back">
+          <div class="stamp"><em>${esc(p.date)}</em>${
+            p.taken ? `<span>摄于 ${esc(p.taken)}</span>` : ''}${
+            p.place ? `<span>◎ ${esc(p.place)}</span>` : ''}</div>
+          <div class="hand${p.note ? '' : ' empty'}">${
+            p.note ? esc(p.note) : '这张背面还没有写字'}</div>
+          <div class="sign">${esc(p.cap)}</div>
+        </div>
+      </div>
+      <button class="lb-flipbtn${p.note ? ' has' : ''}" type="button" data-flip="1">
+        <span class="dot" aria-hidden="true"></span><span class="tx">背面</span>
+      </button>
     </figure>
   </div>`;
 
@@ -1288,6 +1566,7 @@ function renderDots(){
 }
 function renderPanes(){
   W = viewport.clientWidth;
+  /* 每次换页都是新 DOM，翻转状态自然复位 */
   zs=1; ztx=0; zty=0;                       /* 换页即重置缩放 */
   track.innerHTML =
     cardHTML(album[wrapIdx(idx-1)]) + cardHTML(album[idx]) + cardHTML(album[wrapIdx(idx+1)]);
@@ -1532,6 +1811,9 @@ function openLB(node, photoEl){
     cap: el._photo.caption,
     date: el.dataset.date,
     dom: el._photo.dominant || '',
+    note: el._photo.note || '',
+    place: node.dataset.place || '',
+    taken: (el._photo.taken_at || '').slice(0, 10),
   }));
   idx = Math.max(0, readys.indexOf(photoEl));
   /* 从这张相纸原来挂着的位置炸开，火花取它自己的主色 */
@@ -1564,6 +1846,9 @@ const pointers = new Map();
 
 viewport.addEventListener('pointerdown', e=>{
   if(animating) return;
+  /* 按在相纸上的按钮时不接管指针：setPointerCapture 会把后续 click 的
+     target 换成 viewport，事件委托就再也认不出这个按钮了 */
+  if(e.target.closest('button')) return;
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
   try{ viewport.setPointerCapture(e.pointerId); }catch(_){}
   track.style.transition='none'; track.classList.remove('anim');
@@ -1698,8 +1983,20 @@ viewport.addEventListener('pointercancel', e=>{
   viewport.style.transform=''; lb.style.background='';
 });
 
+/* 翻到相纸背面看手记；换页/关灯箱都会自动翻回正面 */
+function flipCard(force){
+  const card = track.children[1];
+  if(!card) return;
+  const on = force === undefined ? !card.classList.contains('flipped') : force;
+  card.classList.toggle('flipped', on);
+  const btn = card.querySelector('.lb-flipbtn .tx');
+  if(btn) btn.textContent = on ? '正面' : '背面';
+  if(on) card.querySelector('.hand')?.focus?.();
+}
+
 /* ---- 点击行为 ---- */
 document.addEventListener('click', e=>{
+  if(e.target.closest('[data-flip]')){ flipCard(); return; }
   const dot = e.target.closest('.lb-dots button');
   if(dot){ jump([...lbDots.children].indexOf(dot)); return; }
   const p = e.target.closest('.node.open .photo');
@@ -1716,9 +2013,16 @@ document.getElementById('lbNext').addEventListener('click', ()=>slide(1));
 
 document.addEventListener('keydown', e=>{
   if(lb.classList.contains('on')){
-    if(e.key==='Escape') closeLB();
+    if(e.key==='Escape'){
+      /* 背面朝上时，Esc 先翻回正面，再按一次才关 */
+      if(track.children[1]?.classList.contains('flipped')){ flipCard(false); return; }
+      closeLB();
+    }
     if(e.key==='ArrowLeft') slide(-1);
     if(e.key==='ArrowRight') slide(1);
+    if(e.key==='f' || e.key==='F' || e.key==='ArrowUp' || e.key==='ArrowDown'){
+      e.preventDefault(); flipCard();
+    }
     if(e.key==='Tab'){
       /* 焦点圈在弹层内循环 */
       const f = [...lb.querySelectorAll('button')].filter(b=>b.offsetParent!==null);
@@ -1749,6 +2053,7 @@ addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); 
 
 /* ================= 首屏加载 ================= */
 loadPage().then(() => sentinelIO.observe(sentinel));
+loadOnThisDay();
 </script>
 </body>
 </html>

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -207,9 +209,10 @@ type NodeInput struct {
 	Date        *string `json:"date"`
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
+	Place       *string `json:"place"`
 }
 
-func validateNodeFields(date, title, description string) error {
+func validateNodeFields(date, title, description, place string) error {
 	if !validDate(date) {
 		return Validationf("date 必须为 YYYY-MM-DD 格式的有效日期")
 	}
@@ -222,12 +225,15 @@ func validateNodeFields(date, title, description string) error {
 	if len([]rune(description)) > 2000 {
 		return Validationf("描述不能超过 2000 字")
 	}
+	if len([]rune(place)) > 80 {
+		return Validationf("地点不能超过 80 字")
+	}
 	return nil
 }
 
 // CreateNode 新建节点。
 func (s *Service) CreateNode(ctx context.Context, in NodeInput) (*NodeDTO, error) {
-	date, title, desc := "", "", ""
+	date, title, desc, place := "", "", "", ""
 	if in.Date != nil {
 		date = *in.Date
 	}
@@ -237,12 +243,15 @@ func (s *Service) CreateNode(ctx context.Context, in NodeInput) (*NodeDTO, error
 	if in.Description != nil {
 		desc = *in.Description
 	}
-	if err := validateNodeFields(date, title, desc); err != nil {
+	if in.Place != nil {
+		place = strings.TrimSpace(*in.Place)
+	}
+	if err := validateNodeFields(date, title, desc, place); err != nil {
 		return nil, err
 	}
 	now := store.Now()
 	n := &store.Node{
-		ID: NewULID(), Date: date, Title: title, Description: desc,
+		ID: NewULID(), Date: date, Title: title, Description: desc, Place: place,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.st.CreateNode(ctx, n); err != nil {
@@ -261,7 +270,7 @@ func (s *Service) PatchNode(ctx context.Context, id string, in NodeInput) (*Node
 	if err != nil {
 		return nil, err
 	}
-	date, title, desc := n.Date, n.Title, n.Description
+	date, title, desc, place := n.Date, n.Title, n.Description, n.Place
 	if in.Date != nil {
 		date = *in.Date
 	}
@@ -271,10 +280,13 @@ func (s *Service) PatchNode(ctx context.Context, id string, in NodeInput) (*Node
 	if in.Description != nil {
 		desc = *in.Description
 	}
-	if err := validateNodeFields(date, title, desc); err != nil {
+	if in.Place != nil {
+		place = strings.TrimSpace(*in.Place)
+	}
+	if err := validateNodeFields(date, title, desc, place); err != nil {
 		return nil, err
 	}
-	if err := s.st.UpdateNode(ctx, id, date, title, desc, store.Now()); err != nil {
+	if err := s.st.UpdateNode(ctx, id, date, title, desc, place, store.Now()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -282,6 +294,119 @@ func (s *Service) PatchNode(ctx context.Context, id string, in NodeInput) (*Node
 	}
 	s.invalidateStats()
 	return s.GetNode(ctx, id)
+}
+
+// OnThisDayDTO 是「那年今日」的一条：往年同一天的节点，附一张封面。
+type OnThisDayDTO struct {
+	Node       *NodeDTO `json:"node"`
+	YearsAgo   int      `json:"years_ago"`
+	CoverThumb string   `json:"cover_thumb"`
+}
+
+// OnThisDay 取往年的今天（月-日相同、年份不同）的节点，最近的在前。
+// 每条附一张封面缩略图，前台横幅直接用。
+func (s *Service) OnThisDay(ctx context.Context, today time.Time, limit int) ([]*OnThisDayDTO, error) {
+	if limit < 1 || limit > 20 {
+		limit = 5
+	}
+	y := today.Format("2006")
+	nodes, err := s.st.NodesOnMonthDay(ctx, today.Format("01-02"), y, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*OnThisDayDTO, 0, len(nodes))
+	if len(nodes) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(nodes))
+	for i, n := range nodes {
+		ids[i] = n.ID
+	}
+	// 每个节点只要封面那一张
+	covers, err := s.st.PhotosByNodeIDsLimited(ctx, ids, 1)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := s.st.PhotoCountsByNodeIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	nowYear, _ := strconv.Atoi(y)
+	for _, n := range nodes {
+		d := s.nodeDTO(ctx, n, nil)
+		d.PhotoCount = counts[n.ID]
+		item := &OnThisDayDTO{Node: d}
+		if yr, err := strconv.Atoi(n.Date[:4]); err == nil {
+			item.YearsAgo = nowYear - yr
+		}
+		if ps := covers[n.ID]; len(ps) > 0 {
+			item.CoverThumb = s.photoDTO(ctx, ps[0]).Variants["thumb"]
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// PlaceDTO 是一处地点及它收着的节点数。
+type PlaceDTO struct {
+	Place string `json:"place"`
+	Count int    `json:"count"`
+}
+
+// Places 列出用过的地点（按节点数倒序）。
+func (s *Service) Places(ctx context.Context) ([]*PlaceDTO, error) {
+	m, err := s.st.Places(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*PlaceDTO, 0, len(m))
+	for pl, c := range m {
+		out = append(out, &PlaceDTO{Place: pl, Count: c})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Place < out[j].Place
+	})
+	return out, nil
+}
+
+// NodesAtPlace 取同一地点的节点（时间倒序），每个带一张封面。
+func (s *Service) NodesAtPlace(ctx context.Context, place string, limit int) ([]*NodeDTO, error) {
+	place = strings.TrimSpace(place)
+	if place == "" {
+		return nil, Validationf("place 不能为空")
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	nodes, err := s.st.NodesByPlace(ctx, place, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*NodeDTO, 0, len(nodes))
+	if len(nodes) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(nodes))
+	for i, n := range nodes {
+		ids[i] = n.ID
+	}
+	covers, err := s.st.PhotosByNodeIDsLimited(ctx, ids, 1)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := s.st.PhotoCountsByNodeIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		d := s.nodeDTO(ctx, n, covers[n.ID])
+		d.PhotoCount = counts[n.ID]
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // DeleteNode 软删节点并级联软删照片。
@@ -314,6 +439,7 @@ func (s *Service) RestoreNode(ctx context.Context, id string) (*NodeDTO, error) 
 // PhotoPatch 是 PATCH /photos/{id} 的输入。
 type PhotoPatch struct {
 	Caption *string `json:"caption"`
+	Note    *string `json:"note"` // 相纸背面的手记
 	Ord     *int64  `json:"ord"`
 	// NodeID 非空时把照片移动到该节点末尾（批量导入后重新归类用）。
 	NodeID *string `json:"node_id"`
@@ -321,8 +447,8 @@ type PhotoPatch struct {
 
 // PatchPhoto 修改图注/序号，或把照片移动到另一个节点。
 func (s *Service) PatchPhoto(ctx context.Context, id string, in PhotoPatch) (*PhotoDTO, error) {
-	if in.Caption == nil && in.Ord == nil && in.NodeID == nil {
-		return nil, Validationf("caption、ord 与 node_id 至少提供一个")
+	if in.Caption == nil && in.Note == nil && in.Ord == nil && in.NodeID == nil {
+		return nil, Validationf("caption、note、ord 与 node_id 至少提供一个")
 	}
 	now := store.Now()
 	// 先移动再改序号：移动会把 ord 重置到目标节点末尾，顺序相反会被覆盖
@@ -351,6 +477,18 @@ func (s *Service) PatchPhoto(ctx context.Context, id string, in PhotoPatch) (*Ph
 			return nil, Validationf("图注不能超过 200 字")
 		}
 		if err := s.st.UpdatePhotoCaption(ctx, id, c, now); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+	}
+	if in.Note != nil {
+		note := strings.TrimRight(*in.Note, " \t\n")
+		if len([]rune(note)) > 2000 {
+			return nil, Validationf("手记不能超过 2000 字")
+		}
+		if err := s.st.UpdatePhotoNote(ctx, id, note, now); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, ErrNotFound
 			}

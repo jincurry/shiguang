@@ -12,6 +12,7 @@ type Photo struct {
 	ID         string
 	NodeID     string
 	Caption    string
+	Note       string // 相纸背面的手记
 	Ord        int64
 	Status     string // pending | processing | ready | failed
 	FailReason *string
@@ -28,13 +29,13 @@ type Photo struct {
 	DeletedAt  *string
 }
 
-const photoCols = `id, node_id, caption, ord, status, fail_reason, sha256, ext,
+const photoCols = `id, node_id, caption, note, ord, status, fail_reason, sha256, ext,
 	width, height, blurhash, dominant, size_bytes, taken_at,
 	created_at, updated_at, deleted_at`
 
 func scanPhoto(row interface{ Scan(...any) error }) (*Photo, error) {
 	var p Photo
-	if err := row.Scan(&p.ID, &p.NodeID, &p.Caption, &p.Ord, &p.Status, &p.FailReason,
+	if err := row.Scan(&p.ID, &p.NodeID, &p.Caption, &p.Note, &p.Ord, &p.Status, &p.FailReason,
 		&p.SHA256, &p.Ext, &p.Width, &p.Height, &p.BlurHash, &p.Dominant,
 		&p.SizeBytes, &p.TakenAt, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt); err != nil {
 		return nil, err
@@ -45,10 +46,10 @@ func scanPhoto(row interface{ Scan(...any) error }) (*Photo, error) {
 // CreatePhoto 插入照片行。
 func (s *Store) CreatePhoto(ctx context.Context, p *Photo) error {
 	_, err := s.writer.ExecContext(ctx,
-		`INSERT INTO photos (id, node_id, caption, ord, status, fail_reason, sha256, ext,
+		`INSERT INTO photos (id, node_id, caption, note, ord, status, fail_reason, sha256, ext,
 		   width, height, blurhash, dominant, size_bytes, taken_at, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		p.ID, p.NodeID, p.Caption, p.Ord, p.Status, p.FailReason, p.SHA256, p.Ext,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.ID, p.NodeID, p.Caption, p.Note, p.Ord, p.Status, p.FailReason, p.SHA256, p.Ext,
 		p.Width, p.Height, p.BlurHash, p.Dominant, p.SizeBytes, p.TakenAt,
 		p.CreatedAt, p.UpdatedAt)
 	if err != nil {
@@ -106,6 +107,20 @@ func (s *Store) UpdatePhotoCaption(ctx context.Context, id, caption, now string)
 		caption, now, id)
 	if err != nil {
 		return fmt.Errorf("store: update caption: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePhotoNote 修改相纸背面的手记。
+func (s *Store) UpdatePhotoNote(ctx context.Context, id, note, now string) error {
+	res, err := s.writer.ExecContext(ctx,
+		`UPDATE photos SET note=?, updated_at=? WHERE id=? AND deleted_at IS NULL`,
+		note, now, id)
+	if err != nil {
+		return fmt.Errorf("store: update note: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound

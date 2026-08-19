@@ -384,6 +384,25 @@
   .card .star{position:absolute;top:12px;left:12px;z-index:3;font-size:12px;
     color:#F4C86A;text-shadow:0 1px 3px rgba(0,0,0,.6);display:none;}
   .card.cover .star{display:block;}
+  /* 背面写过字的角标 */
+  .card .noted{
+    position:absolute;right:10px;bottom:46px;z-index:3;display:none;
+    font-size:10px;color:var(--print-sub);
+  }
+  .card.noted-on .noted{display:block;}
+
+  /* 手记编辑弹层 */
+  .noteboxwrap .box{width:min(560px,94vw);}
+  .noteboxwrap textarea{
+    width:100%;min-height:200px;margin-top:14px;resize:vertical;
+    font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
+    font-size:16px;line-height:1.9;
+  }
+  .noteboxwrap .cnt{
+    margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--faint);
+    letter-spacing:.1em;text-align:right;
+  }
+  .noteboxwrap .cnt.over{color:var(--safelight);}
   /* 悬浮操作 */
   .card .ops{
     position:absolute;top:10px;right:10px;z-index:3;display:flex;gap:6px;
@@ -721,13 +740,14 @@ const state = {
 
 function mapPhoto(p){
   return {
-    id: p.id, cap: p.caption, st: p.status, fail: p.fail_reason,
+    id: p.id, cap: p.caption, note: p.note || '', st: p.status, fail: p.fail_reason,
     variants: p.variants || {},
     bg: p.variants && p.variants.thumb ? `url('${p.variants.thumb}')` : ''
   };
 }
 function mapNode(n){
   return {id: n.id, date: n.date, title: n.title, desc: n.description,
+          place: n.place || '',
           photo_count: n.photo_count || 0,
           photos: (n.photos || []).map(mapPhoto),
           _loaded: Array.isArray(n.photos)};
@@ -1174,6 +1194,13 @@ function renderDetail(){
                placeholder="给这一天起个名字">
       </div>
       <div class="f wide">
+        <label for="fPlace">地点</label>
+        <input type="text" id="fPlace" maxlength="80" value="${esc(n.place || '')}"
+               placeholder="外婆家 / 黄山 / 家里…… 同名地点会串在一起"
+               list="placeOptions" autocomplete="off">
+        <datalist id="placeOptions"></datalist>
+      </div>
+      <div class="f wide">
         <label for="fDesc">描述</label>
         <textarea id="fDesc" maxlength="2000"
                   placeholder="那天发生了什么，留给以后的自己看">${esc(n.desc)}</textarea>
@@ -1224,6 +1251,7 @@ function renderDetail(){
   datePicker?._unmount?.();
   datePicker = $('#dpDate');
   mountDatePicker(datePicker);
+  loadPlaces();
   $('#gridSelAll').onclick = () => {
     n.photos.forEach(p => { if(!String(p.id).startsWith('tmp-')) sel.add(p.id); });
     syncSel();
@@ -1234,8 +1262,10 @@ function renderDetail(){
     if(!t){ toast('标题不能为空', 'err'); return; }
     try{
       const upd = await api(`/nodes/${n.id}`, {method: 'PATCH',
-        body: {date: $('#fDate').value || n.date, title: t, description: $('#fDesc').value}});
-      n.date = upd.date; n.title = upd.title; n.desc = upd.description;
+        body: {date: $('#fDate').value || n.date, title: t,
+               description: $('#fDesc').value, place: $('#fPlace').value}});
+      n.date = upd.date; n.title = upd.title; n.desc = upd.description; n.place = upd.place;
+      loadPlaces();                       /* 新地点进入候选 */
       renderList(); renderStats();
       $('#saved').classList.add('show');
       setTimeout(() => $('#saved')?.classList.remove('show'), 1600);
@@ -1324,13 +1354,15 @@ let gridIO = null, imgIO = null;
 
 function cardHTML(p, i){
   return `
-    <figure class="card ${i === 0 ? 'cover' : ''} ${(p.st === 'uploading' || p.st === 'queued') ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
+    <figure class="card ${i === 0 ? 'cover' : ''} ${p.note ? 'noted-on' : ''} ${(p.st === 'uploading' || p.st === 'queued') ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
             data-id="${esc(p.id)}">
       <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
       <span class="star">★ 封面</span>
+      <span class="noted" title="背面写过字">✍</span>
       <button class="pick-box" data-op="pick" title="选中（按住 Shift 可连选）"
               aria-label="选中这张">✓</button>
       <div class="ops">
+        <button data-op="note" title="写相纸背面的手记">✍</button>
         <button data-op="cap" title="改图注">✎</button>
         <button data-op="cover" title="设为封面">★</button>
         <button data-op="move" title="移到其他节点">⇄</button>
@@ -1680,6 +1712,18 @@ function bindCards(n){
       n.photos = [p, ...n.photos.filter(x => x.id !== p.id)];
       renderGrid(n);
       try{ await pushOrder(n, prev); toast('已设为封面', 'ok'); }catch(_){}
+    }else if(op === 'note'){
+      const val = await noteBox(p);
+      if(val !== null && val !== p.note){
+        try{
+          const d = await api(`/photos/${p.id}`, {method: 'PATCH', body: {note: val}});
+          p.note = d.note;
+          renderGrid(n);
+          toast(val ? '已写在背面' : '已擦掉背面的字', 'ok');
+        }catch(err){
+          toast(errMsg(err, '保存失败'), 'err');
+        }
+      }
     }else if(op === 'cap'){
       const b = card.querySelector('.cap b');
       const inp = document.createElement('input'); inp.value = p.cap; inp.maxLength = 200;
@@ -1818,6 +1862,65 @@ document.addEventListener('keydown', e => {
   if(e.key === 'Escape' && sel.size && !$('#modal').classList.contains('on')
      && !$('#pickModal').classList.contains('on')) clearSel();
 });
+
+/* 相纸背面手记的编辑弹层：确定返回文本，取消返回 null */
+function noteBox(p){
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal on noteboxwrap';
+    wrap.innerHTML = `
+      <div class="box">
+        <h4>写在相纸背面</h4>
+        <p>像在老照片背后用铅笔写的那样，写给以后看这张照片的人。</p>
+        <textarea maxlength="2000" placeholder="那天……"></textarea>
+        <div class="cnt"></div>
+        <div class="row">
+          <button class="btn ghost" data-x="cancel">取消</button>
+          <button class="btn" data-x="ok">写上去</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const ta = wrap.querySelector('textarea');
+    const cnt = wrap.querySelector('.cnt');
+    ta.value = p.note || '';
+    const sync = () => {
+      const n = [...ta.value].length;
+      cnt.textContent = `${n} / 2000`;
+      cnt.classList.toggle('over', n > 2000);
+    };
+    ta.addEventListener('input', sync); sync();
+    const close = v => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = e => {
+      if(e.key === 'Escape') close(null);
+      /* Ctrl/⌘+Enter 提交，写长文时不用去够按钮 */
+      if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)) close(ta.value);
+    };
+    document.addEventListener('keydown', onKey);
+    wrap.addEventListener('click', e => {
+      if(e.target === wrap) close(null);
+      const x = e.target.closest('[data-x]')?.dataset.x;
+      if(x === 'cancel') close(null);
+      if(x === 'ok') close(ta.value);
+    });
+    setTimeout(() => ta.focus(), 30);
+  });
+}
+
+/* 地点候选：填过的地点做成 datalist，避免同一处写出好几种写法 */
+async function loadPlaces(){
+  try{
+    const d = await api('/places');
+    const dl = $('#placeOptions');
+    if(!dl) return;
+    dl.innerHTML = '';
+    d.items.forEach(it => {
+      const o = document.createElement('option');
+      o.value = it.place;
+      o.label = `${it.count} 个日子`;
+      dl.appendChild(o);
+    });
+  }catch(_){}
+}
 
 /* ================= 新建节点 ================= */
 $('#newNode').addEventListener('click', async () => {
