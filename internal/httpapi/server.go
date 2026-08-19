@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -123,6 +125,9 @@ func (s *Server) Handler() http.Handler {
 				g.Get("/nodes/{id}", s.handleGetNode)
 				g.Get("/photos/{id}", s.handleGetPhoto)
 				g.Get("/stats", s.handleStats)
+				g.Get("/on-this-day", s.handleOnThisDay)
+				g.Get("/places", s.handlePlaces)
+				g.Get("/places/{place}", s.handleNodesAtPlace)
 			})
 			// 写接口（管理员）
 			api.Group(func(g chi.Router) {
@@ -200,6 +205,60 @@ func (s *Server) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleOnThisDay 往年的今天。日期取服务器本地时区的今天，前端也可以传
+// ?date=YYYY-MM-DD 覆盖（时区差一天时前端更知道用户的"今天"是哪天）。
+func (s *Server) handleOnThisDay(w http.ResponseWriter, r *http.Request) {
+	day := time.Now()
+	if v := r.URL.Query().Get("date"); v != "" {
+		t, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "date 必须为 YYYY-MM-DD")
+			return
+		}
+		day = t
+	}
+	limit := 5
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 20 {
+			writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "limit 取值 1-20")
+			return
+		}
+		limit = n
+	}
+	items, err := s.svc.OnThisDay(r.Context(), day, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// handlePlaces 列出用过的地点。
+func (s *Server) handlePlaces(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.Places(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// handleNodesAtPlace 同一地点下的节点（各带一张封面）。
+func (s *Server) handleNodesAtPlace(w http.ResponseWriter, r *http.Request) {
+	place, err := url.PathUnescape(chi.URLParam(r, "place"))
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "place 参数无法解析")
+		return
+	}
+	items, err := s.svc.NodesAtPlace(r.Context(), place, 50)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"place": place, "items": items})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
