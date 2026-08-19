@@ -549,7 +549,9 @@
   /* 相纸背面：老照片背面用铅笔写的那段话 */
   .lb-flip{position:relative;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.35,1);}
   .lb-card.flipped .lb-flip{transform:rotateY(180deg);}
-  .lb-flip>.face{backface-visibility:hidden;-webkit-backface-visibility:hidden;}
+  .lb-flip>.face,.lb-flip>.lb-back{
+    backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  }
   .lb-back{
     position:absolute;inset:0;transform:rotateY(180deg);
     display:flex;flex-direction:column;
@@ -570,10 +572,14 @@
   .lb-back .hand{
     flex:1;overflow-y:auto;min-height:0;
     font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
-    font-size:16.5px;line-height:2;color:#5A4F3E;
+    font-size:16.5px;line-height:33px;color:#5A4F3E;
     white-space:pre-wrap;word-break:break-word;
     /* 铅笔写在纸上：字略微倾斜、颜色偏灰 */
     transform:rotate(-.4deg);
+    /* 淡横格，行距对齐：字少时整张纸不至于空得发慌 */
+    background-image:repeating-linear-gradient(
+      180deg,transparent 0 32px,rgba(120,105,80,.13) 32px 33px);
+    background-position:0 -1px;
   }
   .lb-back .hand.empty{color:#A2957E;font-family:var(--mono);font-size:12px;
     letter-spacing:.12em;transform:none;}
@@ -1501,7 +1507,7 @@ const cardHTML = p => `
             p.taken ? `<span>摄于 ${esc(p.taken)}</span>` : ''}${
             p.place ? `<span>◎ ${esc(p.place)}</span>` : ''}</div>
           <div class="hand${p.note ? '' : ' empty'}">${
-            p.note ? esc(p.note) : '这张背面还没有写字'}</div>
+            p.note ? esc(p.note) : '这张背面还是空白的\n在后台点这张照片的 ✍ 就能写上'}</div>
           <div class="sign">${esc(p.cap)}</div>
         </div>
       </div>
