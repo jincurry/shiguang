@@ -430,11 +430,13 @@
   }
   /* 火花绽放期间灯箱不做实时毛玻璃：canvas 每帧重绘会连带把下面那层
      backdrop-filter 全屏重算一遍，实测帧率因此腰斩。换成加深的纯色底。 */
-  body.sparking .lightbox{
+  body.sparking .lightbox,
+  body.lb-busy .lightbox{
     -webkit-backdrop-filter:none;backdrop-filter:none;
     background:rgba(12,10,8,.93);
   }
-  body.sparking.light .lightbox{background:rgba(240,235,225,.95);}
+  body.sparking.light .lightbox,
+  body.lb-busy.light .lightbox{background:rgba(240,235,225,.95);}
 
   .lightbox{
     position:fixed;inset:0;z-index:100;
@@ -463,6 +465,24 @@
   .lb-card:first-child .lb-frame{transform:rotate(-4deg) scale(.94);}
   .lb-card:last-child  .lb-frame{transform:rotate(4deg) scale(.94);}
   .lb-track.anim .lb-frame{transition:transform .32s cubic-bezier(.22,.9,.3,1);}
+
+  /* 换片：新到位的相纸先是欠曝模糊，很快显影清晰；同时像被夹子挂上一样摆两下 */
+  .lb-track.swap .lb-card:nth-child(2) .lb-pic{
+    animation:lbDevelop .55s cubic-bezier(.25,.7,.35,1) both;
+  }
+  @keyframes lbDevelop{
+    from{filter:contrast(.45) brightness(1.45) sepia(.4) blur(3px);}
+    to  {filter:none;}
+  }
+  .lb-track.swap .lb-card:nth-child(2) .lb-frame{
+    animation:lbSwing .62s cubic-bezier(.3,.6,.4,1) both;
+  }
+  @keyframes lbSwing{
+    0%  {transform:rotate(var(--sw,3deg)) translateY(-4px);}
+    42% {transform:rotate(calc(var(--sw,3deg) * -.42));}
+    72% {transform:rotate(calc(var(--sw,3deg) * .18));}
+    100%{transform:none;}
+  }
 
   .lightbox.first-open .lb-card:nth-child(2) .lb-frame{
     animation:lbIn .35s cubic-bezier(.22,.9,.3,1);
@@ -1266,25 +1286,48 @@ function renderPanes(){
   renderDots();
   lbLive.textContent = `第 ${idx+1} 张，共 ${album.length} 张：${album[idx].cap}`;
 }
+/* 换片这一段里关掉灯箱的实时毛玻璃：每帧都在动的画面配 backdrop-filter，
+   会把整块模糊反复重算，实测连翻时帧率减半。停下来就恢复。 */
+let busyT = 0;
+function lbBusy(){
+  document.body.classList.add('lb-busy');
+  clearTimeout(busyT);
+  busyT = setTimeout(() => document.body.classList.remove('lb-busy'), 780);
+}
+
 function slide(dir){
   if(animating || album.length<2) return;
   animating = true;
+  lbBusy();
   setX(-dir*W, true);
   parallax(-dir*W);
+  sparkTrail(dir, album[wrapIdx(idx + dir)]?.dom);
   const done = ()=>{
     idx = wrapIdx(idx+dir);
     renderPanes();
+    /* 新到位的这张：像刚从显影盘里提出来，再被夹子挂稳 */
+    swapIn(dir);
     animating = false;
     if(!swiped){ swiped = true; lbFooter.classList.add('hide-hint'); }
   };
   reduceMotion ? done() : setTimeout(done, 330);
 }
+
+/* 换片入场：显影 + 钟摆。track 每次都是新 DOM，加个 class 就能重新触发 */
+function swapIn(dir){
+  if(reduceMotion) return;
+  track.style.setProperty('--sw', (dir > 0 ? 3.2 : -3.2) + 'deg');
+  track.classList.remove('swap');
+  void track.offsetWidth;                /* 强制重排，动画才会重放 */
+  track.classList.add('swap');
+}
 function jump(i){
   if(animating || i===idx) return;
   if(reduceMotion){ idx=i; renderPanes(); return; }
+  lbBusy();
   track.style.transition='opacity .15s ease'; track.style.opacity=0;
   setTimeout(()=>{
-    idx=i; renderPanes();
+    idx=i; renderPanes(); swapIn(1);
     requestAnimationFrame(()=>{
       track.style.transition='opacity .2s ease'; track.style.opacity=1;
     });
@@ -1318,8 +1361,15 @@ function sparkStop(){
   document.body.classList.remove('sparking');
 }
 
-function burstAt(x, y, dominant){
+function burstAt(x, y, dominant, opt){
   if(reduceMotion) return;
+  const o = Object.assign({
+    n: innerWidth < 640 ? 64 : 112,   /* 火星数 */
+    fast: 8.5, slow: 3.4,             /* 快/慢两层的速度上限 */
+    lift: 1.6,                        /* 上抛量 */
+    flash: 1, ring: true,             /* 闪光与冲击波 */
+    dir: 0, spread: Math.PI * 2,      /* 方向偏置与张角：0 表示整圈铺开 */
+  }, opt);
   const dpr = Math.min(devicePixelRatio || 1, 2);
   if(!sparkCv){
     sparkCv = document.createElement('canvas');
@@ -1338,28 +1388,48 @@ function burstAt(x, y, dominant){
 
   const own = rgbOf(dominant);
   const palette = own ? [ember(own), ember(own), ...SPARK_BASE] : SPARK_BASE;
-  /* 小屏少放一些，别让低端机掉帧 */
-  const n = innerWidth < 640 ? 64 : 112;
   const scale = Math.min(1, innerWidth / 1280) * .5 + .6;
 
-  for(let i = 0; i < n; i++){
-    /* 角度均匀铺开再加抖动，避免出现规则的放射线 */
-    const a = (i / n) * Math.PI * 2 + (Math.random() - .5) * .55;
+  for(let i = 0; i < o.n; i++){
+    /* 角度均匀铺开再加抖动，避免出现规则的放射线；
+       换片时只朝一侧扇形喷出（dir 是中轴，spread 是张角） */
+    const a = o.dir + ((i / o.n) - (o.spread < Math.PI * 2 ? .5 : 0)) * o.spread
+              + (Math.random() - .5) * .5;
     /* 速度分两层：大部分飞得远，小部分留在近处慢慢熄，才有层次 */
-    const sp = (Math.random() < .72 ? 5.5 + Math.random() * 8.5 : 1.8 + Math.random() * 3.4) * scale;
+    const sp = (Math.random() < .72 ? o.fast * .65 + Math.random() * o.fast
+                                    : 1.4 + Math.random() * o.slow) * scale;
     sparkParts.push({
       x, y, px: x, py: y,
       vx: Math.cos(a) * sp,
-      vy: Math.sin(a) * sp - 1.6,          /* 略微上抛，落下来才好看 */
-      life: 38 + Math.random() * 34, age: 0,
+      vy: Math.sin(a) * sp - o.lift,       /* 略微上抛，落下来才好看 */
+      life: 30 + Math.random() * 34, age: 0,
       w: .9 + Math.random() * 2.1,
       c: palette[(Math.random() * palette.length) | 0],
       split: Math.random() < .3 ? 1 : 0,   /* 三成会在半路二次绽开 */
     });
   }
-  sparkFlash = 1;
-  sparkRing = 0;
+  sparkFlash = o.flash;
+  sparkRing = o.ring ? 0 : -1;
   if(!sparkRAF) sparkRAF = requestAnimationFrame(sparkTick);
+}
+
+/* 换片时从相纸离开的那一侧带出一小撮火星，不放闪光也不放冲击波 */
+let lastTrail = 0;
+function sparkTrail(dir, dominant){
+  if(reduceMotion) return;
+  const frame = track.children[1]?.querySelector('.lb-frame');
+  if(!frame) return;
+  const now = performance.now();
+  if(now - lastTrail < 260) return;      /* 按住方向键狂翻时别堆积 */
+  lastTrail = now;
+  const r = frame.getBoundingClientRect();
+  burstAt(dir > 0 ? r.right - 6 : r.left + 6, r.top + r.height * .45, dominant, {
+    n: innerWidth < 640 ? 10 : 16,
+    fast: 4.2, slow: 2, lift: .6,
+    flash: 0, ring: false,
+    dir: dir > 0 ? 0 : Math.PI,          /* 朝相纸滑走的反方向甩 */
+    spread: Math.PI * .8,
+  });
 }
 
 function sparkTick(){
@@ -1447,7 +1517,8 @@ function openLB(node, photoEl){
     md:  el._photo.variants.md || el._photo.variants.thumb || '',
     lg:  el._photo.variants.lg || '',
     cap: el._photo.caption,
-    date: el.dataset.date
+    date: el.dataset.date,
+    dom: el._photo.dominant || '',
   }));
   idx = Math.max(0, readys.indexOf(photoEl));
   /* 从这张相纸原来挂着的位置炸开，火花取它自己的主色 */
@@ -1463,6 +1534,8 @@ function openLB(node, photoEl){
 }
 function closeLB(){
   sparkStop();
+  clearTimeout(busyT);
+  document.body.classList.remove('lb-busy');
   lb.classList.remove('on');
   document.documentElement.style.overflow = '';
   viewport.style.transform = '';
