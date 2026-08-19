@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"io"
 	"log/slog"
@@ -649,5 +651,38 @@ func TestTimelineWithoutPhotos(t *testing.T) {
 	fit := full["items"].([]any)[0].(map[string]any)
 	if photos, _ := fit["photos"].([]any); len(photos) != 1 {
 		t.Errorf("default must include photos, got %v", photos)
+	}
+}
+
+// TestTimelinePhotoLimit photo_limit=N 每节点最多带 N 张，但 photo_count 仍是真实总数——
+// 前台首屏只要折叠摞露出的那几张，几百张的节点不能整摞下发。
+func TestTimelinePhotoLimit(t *testing.T) {
+	ts := newTestServer(t, 30)
+	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
+		map[string]string{"date": "2026-04-04", "title": "N"})
+	nodeID, _ := node["id"].(string)
+	for i := 0; i < 5; i++ {
+		var jb bytes.Buffer
+		// 整块填不同颜色：JPEG 有损，只改一个像素可能压出同样的字节而撞秒传
+		img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+		draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{uint8(i * 50), 20, 30, 255}},
+			image.Point{}, draw.Src)
+		jpeg.Encode(&jb, img, nil)
+		uploadTestPhoto(t, ts, nodeID, fmt.Sprintf("p%d.jpg", i), jb.Bytes())
+	}
+
+	_, out := doJSON(t, "GET", ts.URL+"/api/v1/timeline?photo_limit=2", testToken, nil)
+	it := out["items"].([]any)[0].(map[string]any)
+	if photos, _ := it["photos"].([]any); len(photos) != 2 {
+		t.Errorf("photos should be capped at 2, got %d", len(photos))
+	}
+	if n := int(it["photo_count"].(float64)); n != 5 {
+		t.Errorf("photo_count must stay the real total, got %d", n)
+	}
+
+	// 越界值拒绝，避免被当成无限制
+	res, _ := doJSON(t, "GET", ts.URL+"/api/v1/timeline?photo_limit=0", testToken, nil)
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("photo_limit=0 should be rejected, got %d", res.StatusCode)
 	}
 }

@@ -248,6 +248,14 @@
     display:flex;align-items:center;gap:12px;margin-bottom:16px;
   }
   .sect>h3::after{content:"";flex:1;height:1px;background:var(--line);}
+  /* 常驻多选入口：排在那条分隔线右边 */
+  .h3-act{
+    order:1;flex:none;letter-spacing:.06em;
+    font-family:var(--mono);font-size:11px;color:var(--muted);
+    border:1px solid var(--line);border-radius:7px;padding:4px 10px;
+    transition:color .2s,border-color .2s;
+  }
+  .h3-act:hover{color:var(--amber);border-color:var(--amber);}
 
   /* 显影盘（上传区） */
   .tray{
@@ -328,6 +336,11 @@
   .card.picked{outline:2px solid var(--amber);outline-offset:2px;}
   .card.picked .ph{filter:brightness(.82);}
   @media (max-width:760px){ .card .pick-box{opacity:1;} }
+
+  .grid-more{
+    margin-top:18px;text-align:center;
+    font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.16em;
+  }
 
   /* 批量操作工具条 */
   #bulkbar{
@@ -860,6 +873,7 @@ $('#nodeList').addEventListener('click', e => {
   const b = e.target.closest('.n-item'); if(!b) return;
   state.sel = b.dataset.id;
   clearSel();                                       /* 换节点即清空选择 */
+  const nn = node(state.sel); if(nn) nn._shown = 0; /* 重新从第一批开始铺 */
   renderList(); renderDetail();
   $('#detail').scrollTop = 0;                       /* 详情栏回顶 */
   $('#mainView').classList.add('showDetail');       /* 手机端切详情视图 */
@@ -897,7 +911,9 @@ function renderDetail(){
     </div>
 
     <div class="sect">
-      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点 / ✓ 多选</h3>
+      <h3>晾片整理 · 拖木夹排序 / ✎ 改注 / ★ 设封面 / ⇄ 移到其他节点
+        <button class="h3-act" id="gridSelAll" type="button">✓ 全选本节点</button>
+      </h3>
       <div class="grid" id="grid"></div>
       <div class="d-empty" id="gridLoading" hidden>正在取出相纸……</div>
     </div>`;
@@ -916,6 +932,10 @@ function renderDetail(){
     });
   }
 
+  $('#gridSelAll').onclick = () => {
+    n.photos.forEach(p => { if(!String(p.id).startsWith('tmp-')) sel.add(p.id); });
+    syncSel();
+  };
   $('#backList').onclick = () => $('#mainView').classList.remove('showDetail');
   $('#saveNode').onclick = async () => {
     const t = $('#fTitle').value.trim();
@@ -1007,9 +1027,11 @@ function pruneSel(){
   syncSel();
 }
 
-function renderGrid(n){
-  const g = $('#grid');
-  g.innerHTML = n.photos.map((p, i) => `
+const GRID_BATCH = 60;          /* 一屏够看即可，几百张一次性铺开会卡住主线程 */
+let gridIO = null, imgIO = null;
+
+function cardHTML(p, i){
+  return `
     <figure class="card ${i === 0 ? 'cover' : ''} ${(p.st === 'uploading' || p.st === 'queued') ? 'uploading' : ''} ${p.st === 'failed' ? 'failed' : ''}"
             data-id="${esc(p.id)}">
       <span class="handle" title="拖拽排序" aria-label="拖拽排序"></span>
@@ -1023,15 +1045,68 @@ function renderGrid(n){
         <button data-op="del" title="删除">✕</button>
       </div>
       <div class="ph">
-        <div class="img ${p.st === 'ready' ? 'dev' : ''}" style="background-image:${esc(p.bg)}"></div>
+        <div class="img ${p.st === 'ready' ? 'dev' : ''}" data-bg="${esc(p.bg)}"></div>
       </div>
       <span class="statebadge" title="${esc(p.fail || '')}">曝光失败</span>
       <button class="retry" data-op="retry">重试</button>
       <div class="prog"><i style="width:${p.prog || 0}%"></i></div>
       <figcaption class="cap"><i>No.${String(i + 1).padStart(2, '0')}</i><b>${esc(p.cap)}</b></figcaption>
-    </figure>`).join('');
+    </figure>`;
+}
+
+/* 图片按需上盘：只有滚进详情栏视口的卡片才真正去取缩略图。
+   一个 192 张的节点，打开时不该一次发 192 个图片请求。 */
+function lazyImgs(){
+  imgIO?.disconnect();
+  imgIO = new IntersectionObserver(es => {
+    es.forEach(en => {
+      if(!en.isIntersecting) return;
+      const el = en.target;
+      if(el.dataset.bg){ el.style.backgroundImage = el.dataset.bg; delete el.dataset.bg; }
+      imgIO.unobserve(el);
+    });
+  }, {root: $('.detail'), rootMargin: '400px 0px'});
+  $('#grid').querySelectorAll('.img[data-bg]').forEach(el => imgIO.observe(el));
+}
+
+/* 分批渲染：先铺一屏，滚到底再追加下一批。
+   正在上传/失败的照片挂在末尾，必须一并渲染出来，否则用户看不到自己刚拖进来的。 */
+function shownCount(n){
+  let need = 0;
+  n.photos.forEach((p, i) => { if(p.st !== 'ready') need = i + 1; });
+  return Math.min(n.photos.length, Math.max(GRID_BATCH, n._shown || 0, need));
+}
+
+function renderGrid(n){
+  const g = $('#grid');
+  n._shown = shownCount(n);
+  g.innerHTML = n.photos.slice(0, n._shown).map((p, i) => cardHTML(p, i)).join('');
   bindCards(n);
   pruneSel();          /* 重建 DOM 后回填选中态，并丢掉已不存在的项 */
+  lazyImgs();
+  gridMore(n);
+}
+
+/* 网格底部哨兵：滚到就追加下一批 */
+function gridMore(n){
+  gridIO?.disconnect();
+  let more = $('#gridMore');
+  if(n._shown >= n.photos.length){ more?.remove(); return; }
+  if(!more){
+    more = document.createElement('div');
+    more.id = 'gridMore'; more.className = 'grid-more';
+    $('#grid').after(more);
+  }
+  more.textContent = `还有 ${n.photos.length - n._shown} 张，继续下拉…`;
+  gridIO = new IntersectionObserver(es => {
+    if(!es[0].isIntersecting || state.sel !== n.id) return;
+    const from = n._shown;
+    n._shown = Math.min(n.photos.length, from + GRID_BATCH);
+    $('#grid').insertAdjacentHTML('beforeend',
+      n.photos.slice(from, n._shown).map((p, i) => cardHTML(p, from + i)).join(''));
+    bindCards(n); syncSel(); lazyImgs(); gridMore(n);
+  }, {root: $('.detail'), rootMargin: '600px 0px'});
+  gridIO.observe(more);
 }
 
 /* ================= 上传（local: multipart / s3: presign→PUT→confirm） =================
@@ -1353,6 +1428,8 @@ function bindCards(n){
   };
   /* 木夹把手拖拽排序（pointer 版，桌面/触屏通用） */
   g.querySelectorAll('.handle').forEach(h => {
+    if(h._bound) return;
+    h._bound = 1;
     h.addEventListener('pointerdown', e => {
       e.preventDefault();
       const card = h.closest('.card'); const from = card.dataset.id;

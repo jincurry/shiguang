@@ -57,7 +57,10 @@ type TimelineDTO struct {
 // Timeline 逆序游标分页：两条 SQL（一页节点 + 批量照片），禁止 N+1。
 // withPhotos=false 时只返回节点元数据与 photo_count，不带 photos——
 // 管理后台的左栏列表用它，避免登录时把整库照片都拉下来。
-func (s *Service) Timeline(ctx context.Context, cursor string, limit int, withPhotos bool) (*TimelineDTO, error) {
+// Timeline 返回逆序时间轴一页。withPhotos=false 只要节点元数据；
+// photoLimit>0 时每个节点最多带 photoLimit 张照片（photo_count 仍是真实总数），
+// 前台首屏只需折叠摞露出的那几张，几百张的节点没必要整摞下发。
+func (s *Service) Timeline(ctx context.Context, cursor string, limit int, withPhotos bool, photoLimit int) (*TimelineDTO, error) {
 	if limit < 1 || limit > 50 {
 		limit = 10
 	}
@@ -99,6 +102,23 @@ func (s *Service) Timeline(ctx context.Context, cursor string, limit int, withPh
 	ids := make([]string, len(nodes))
 	for i, n := range nodes {
 		ids[i] = n.ID
+	}
+	if photoLimit > 0 {
+		photosByNode, err := s.st.PhotosByNodeIDsLimited(ctx, ids, photoLimit)
+		if err != nil {
+			return nil, err
+		}
+		// 照片被截断了，总数得单独查，否则前台会以为节点只有这几张
+		counts, err := s.st.PhotoCountsByNodeIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range nodes {
+			d := s.nodeDTO(ctx, n, photosByNode[n.ID])
+			d.PhotoCount = counts[n.ID]
+			out.Items = append(out.Items, d)
+		}
+		return out, nil
 	}
 	photosByNode, err := s.st.PhotosByNodeIDs(ctx, ids)
 	if err != nil {

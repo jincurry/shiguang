@@ -187,6 +187,41 @@ func (s *Store) PhotosByNodeIDs(ctx context.Context, nodeIDs []string) (map[stri
 	return out, rows.Err()
 }
 
+// PhotosByNodeIDsLimited 与 PhotosByNodeIDs 相同，但每个节点最多取前 perNode 张
+// （按 ord, id）。前台首屏只需要折叠摞露出的那几张，几百张的节点没必要整摞下发。
+func (s *Store) PhotosByNodeIDsLimited(ctx context.Context, nodeIDs []string, perNode int) (map[string][]*Photo, error) {
+	out := make(map[string][]*Photo, len(nodeIDs))
+	if len(nodeIDs) == 0 || perNode < 1 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(nodeIDs)), ",")
+	args := make([]any, 0, len(nodeIDs)+1)
+	for _, id := range nodeIDs {
+		args = append(args, id)
+	}
+	args = append(args, perNode)
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT `+photoCols+` FROM (
+		   SELECT `+photoCols+`,
+		          ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY ord, id) AS rn
+		   FROM photos
+		   WHERE node_id IN (`+ph+`) AND deleted_at IS NULL
+		 ) WHERE rn <= ?
+		 ORDER BY node_id, ord, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: photos by nodes limited: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		p, err := scanPhoto(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: photos scan: %w", err)
+		}
+		out[p.NodeID] = append(out[p.NodeID], p)
+	}
+	return out, rows.Err()
+}
+
 // PhotoCountsByNodeIDs 批量取各节点的存活照片数（不取照片本体）。
 // 后台左栏只需要计数，走这条比拉全部照片行便宜一个数量级。
 func (s *Store) PhotoCountsByNodeIDs(ctx context.Context, nodeIDs []string) (map[string]int, error) {
