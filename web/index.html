@@ -565,37 +565,34 @@
   .lb-back{
     position:absolute;inset:0;
     display:flex;flex-direction:column;
-    background:var(--paper-raw);border-radius:2px;
-    padding:26px 26px 20px;overflow:hidden;
+    /* 相纸背面：中间偏亮、四边微微发黄，像一张真的相纸背面 */
+    background:
+      radial-gradient(115% 75% at 50% 12%,rgba(255,253,246,.75),transparent 62%),
+      var(--paper-raw);
+    border-radius:2px;
+    padding:clamp(26px,7%,46px) clamp(24px,8%,56px);
+    overflow:hidden;
   }
   .lb-back::after{                       /* 背面也有纸纹 */
     content:"";position:absolute;inset:0;pointer-events:none;
-    background-image:var(--grain);opacity:.2;mix-blend-mode:multiply;
+    background-image:var(--grain);opacity:.22;mix-blend-mode:multiply;
   }
   .lb-back .stamp{
-    font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;
-    color:#9C8F79;border-bottom:1px dashed rgba(120,105,80,.35);
-    padding-bottom:8px;margin-bottom:14px;
-    display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;
+    flex:none;
+    font-family:var(--mono);font-size:10px;letter-spacing:.24em;
+    color:#A2957E;
+    display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;
   }
-  .lb-back .stamp em{font-style:normal;color:#7C6E58;}
+  .lb-back .stamp em{font-style:normal;color:#8A7C64;}
+  /* 少量文字垂直居中（像随手写在纸中间），长文从顶部开始并可滚动 */
+  .lb-hand-wrap{flex:1;min-height:0;overflow-y:auto;display:flex;
+    scrollbar-width:thin;scrollbar-color:rgba(120,105,80,.3) transparent;}
   .lb-back .hand{
-    flex:1;overflow-y:auto;min-height:0;
+    margin:auto 0;width:100%;
     font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
-    font-size:16.5px;line-height:33px;color:#5A4F3E;
+    font-size:clamp(15px,2.6vw,18px);line-height:2.1;color:#544A3A;
     white-space:pre-wrap;word-break:break-word;
-    /* 铅笔写在纸上：字略微倾斜、颜色偏灰 */
-    transform:rotate(-.4deg);
-    /* 淡横格，行距对齐：字少时整张纸不至于空得发慌 */
-    background-image:repeating-linear-gradient(
-      180deg,transparent 0 32px,rgba(120,105,80,.13) 32px 33px);
-    background-position:0 -1px;
-  }
-  .lb-back .hand.empty{color:#A2957E;font-family:var(--mono);font-size:12px;
-    letter-spacing:.12em;transform:none;}
-  .lb-back .sign{
-    margin-top:12px;text-align:right;
-    font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:#A2957E;
+    transform:rotate(-.35deg);           /* 手写不会绝对水平 */
   }
   /* 翻面按钮：压在相纸右下角，像一个纸角 */
   .lb-flipbtn{
@@ -609,9 +606,7 @@
   .lb-flipbtn:hover{color:var(--print-ink);border-color:rgba(120,105,80,.5);background:#fff;}
   .lb-flipbtn .dot{
     width:5px;height:5px;border-radius:50%;background:var(--safelight);
-    display:none;                        /* 有手记时才亮这颗点 */
   }
-  .lb-flipbtn.has .dot{display:block;}
   .lb-card.flipped .lb-flipbtn{background:rgba(240,233,218,.9);}
   /* 左右两张是预备位，在屏幕外；它们的翻面按钮不该存在，
      否则 Tab 会聚焦到看不见的按钮上 */
@@ -724,7 +719,7 @@
     transition:opacity .5s ease;
   }
   .lb-flip-hint{display:none;margin-left:16px;color:var(--faint);}
-  @media (hover:hover){.lb-flip-hint{display:inline-block;}}
+  @media (hover:hover){.lb-flip-hint:not([hidden]){display:inline-block;}}
   .lb-footer.hide-hint .lb-swipe-hint{opacity:0;}
   @media (hover:hover){.lb-swipe-hint{display:none;}}
 
@@ -850,7 +845,7 @@
   <div class="lb-footer" id="lbFooter">
     <span class="lb-dots" id="lbDots" aria-label="相册页码"></span>
     <span class="lb-swipe-hint">滑动切换 · 下滑关闭 · 双击放大</span>
-    <span class="lb-flip-hint">F 翻到背面</span>
+    <span class="lb-flip-hint" id="lbFlipHint" hidden>F 翻到背面</span>
   </div>
 </div>
 <button class="totop" id="toTop" aria-label="回到顶部" title="回到最近的日子">↑</button>
@@ -1512,18 +1507,17 @@ const cardHTML = p => `
           <figcaption class="lb-bar"><b>${esc(p.cap)}</b><span>${esc(p.date)}</span>${
             p.place ? `<span class="lb-place">◎ ${esc(p.place)}</span>` : ''}</figcaption>
         </div>
+${p.note ? `
         <div class="lb-back">
           <div class="stamp"><em>${esc(p.date)}</em>${
-            p.taken ? `<span>摄于 ${esc(p.taken)}</span>` : ''}${
+            p.taken && p.taken !== p.date ? `<span>摄于 ${esc(p.taken)}</span>` : ''}${
             p.place ? `<span>◎ ${esc(p.place)}</span>` : ''}</div>
-          <div class="hand${p.note ? '' : ' empty'}">${
-            p.note ? esc(p.note) : '这张背面还是空白的\n在后台点这张照片的 ✍ 就能写上'}</div>
-          <div class="sign">${esc(p.cap)}</div>
-        </div>
-      </div>
-      <button class="lb-flipbtn${p.note ? ' has' : ''}" type="button" data-flip="1">
+          <div class="lb-hand-wrap"><div class="hand">${esc(p.note)}</div></div>
+        </div>` : ''}
+      </div>${p.note ? `
+      <button class="lb-flipbtn" type="button" data-flip="1">
         <span class="dot" aria-hidden="true"></span><span class="tx">背面</span>
-      </button>
+      </button>` : ''}
     </figure>
   </div>`;
 
@@ -1588,6 +1582,7 @@ function renderPanes(){
     cardHTML(album[wrapIdx(idx-1)]) + cardHTML(album[idx]) + cardHTML(album[wrapIdx(idx+1)]);
   setX(0);
   renderDots();
+  document.getElementById('lbFlipHint').hidden = !album[idx]?.note;
   lbLive.textContent = `第 ${idx+1} 张，共 ${album.length} 张：${album[idx].cap}`;
 }
 /* 换片这一段里关掉灯箱的实时毛玻璃：每帧都在动的画面配 backdrop-filter，
@@ -2002,7 +1997,7 @@ viewport.addEventListener('pointercancel', e=>{
 /* 翻到相纸背面看手记；换页/关灯箱都会自动翻回正面 */
 function flipCard(force){
   const card = track.children[1];
-  if(!card) return;
+  if(!card || !card.querySelector('.lb-back')) return;   /* 没写过字就没有背面 */
   const on = force === undefined ? !card.classList.contains('flipped') : force;
   card.classList.toggle('flipped', on);
   const btn = card.querySelector('.lb-flipbtn .tx');
