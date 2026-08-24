@@ -768,3 +768,97 @@ func TestOnThisDay(t *testing.T) {
 		}
 	}
 }
+
+// TestLetters 信箱：未到投递时间的信在前台完全不存在——不是前端藏起来，
+// 是列表里没有、按 id 直取也 404。
+func TestLetters(t *testing.T) {
+	ts := newTestServer(t, 30)
+
+	_, now := doJSON(t, "POST", ts.URL+"/api/v1/letters", testToken, map[string]string{
+		"title": "现在就投", "body": "见字如面", "sender": "我"})
+	_, later := doJSON(t, "POST", ts.URL+"/api/v1/letters", testToken, map[string]string{
+		"title": "很久以后", "body": "秘密", "deliver_at": "2099-01-01"})
+	nowID, _ := now["id"].(string)
+	laterID, _ := later["id"].(string)
+	if now["pending"] != false || later["pending"] != true {
+		t.Fatalf("pending 判定不对: %v / %v", now["pending"], later["pending"])
+	}
+
+	// 前台列表：只看得见已投递的
+	res, out := doJSON(t, "GET", ts.URL+"/api/v1/letters", "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("public letters: %d", res.StatusCode)
+	}
+	items, _ := out["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("前台应只有 1 封，得到 %d", len(items))
+	}
+	if got := items[0].(map[string]any)["title"]; got != "现在就投" {
+		t.Errorf("前台看到了不该看的信: %v", got)
+	}
+	if int(out["unread"].(float64)) != 1 {
+		t.Errorf("未读数: %v", out["unread"])
+	}
+	// 连正文都不该出现在响应里
+	raw, _ := json.Marshal(out)
+	if strings.Contains(string(raw), "秘密") {
+		t.Error("未投递的信泄漏进了前台响应")
+	}
+
+	// 按 id 直取未投递的信 → 404
+	res, _ = doJSON(t, "GET", ts.URL+"/api/v1/letters/"+laterID, "", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("未投递的信按 id 直取应 404，得到 %d", res.StatusCode)
+	}
+
+	// 读一封 → 记下 read_at，未读数归零
+	_, one := doJSON(t, "GET", ts.URL+"/api/v1/letters/"+nowID, "", nil)
+	if one["read_at"] == nil {
+		t.Error("读过之后 read_at 仍为空")
+	}
+	_, out2 := doJSON(t, "GET", ts.URL+"/api/v1/letters", "", nil)
+	if n := int(out2["unread"].(float64)); n != 0 {
+		t.Errorf("读完未读数应为 0，得到 %d", n)
+	}
+
+	// 管理端能看到全部
+	_, adm := doJSON(t, "GET", ts.URL+"/api/v1/admin/letters", testToken, nil)
+	if n := len(adm["items"].([]any)); n != 2 {
+		t.Errorf("管理端应看到 2 封，得到 %d", n)
+	}
+	// 管理端接口需要口令
+	res, _ = doJSON(t, "GET", ts.URL+"/api/v1/admin/letters", "", nil)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("管理端列信应要口令，得到 %d", res.StatusCode)
+	}
+
+	// 把未投递的改成立刻投递 → 前台立刻看得到
+	doJSON(t, "PATCH", ts.URL+"/api/v1/letters/"+laterID, testToken,
+		map[string]string{"deliver_at": "2020-01-01"})
+	_, out3 := doJSON(t, "GET", ts.URL+"/api/v1/letters", "", nil)
+	if n := len(out3["items"].([]any)); n != 2 {
+		t.Errorf("改了投递时间后前台应有 2 封，得到 %d", n)
+	}
+
+	// 收回
+	res, _ = doJSON(t, "DELETE", ts.URL+"/api/v1/letters/"+laterID, testToken, nil)
+	if res.StatusCode != http.StatusNoContent {
+		t.Errorf("收回信件: %d", res.StatusCode)
+	}
+	_, out4 := doJSON(t, "GET", ts.URL+"/api/v1/letters", "", nil)
+	if n := len(out4["items"].([]any)); n != 1 {
+		t.Errorf("收回后前台应剩 1 封，得到 %d", n)
+	}
+
+	// 校验：空标题、超长正文
+	res, _ = doJSON(t, "POST", ts.URL+"/api/v1/letters", testToken,
+		map[string]string{"title": "  ", "body": "x"})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("空标题应被拒，得到 %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, "POST", ts.URL+"/api/v1/letters", testToken,
+		map[string]string{"title": "t", "body": strings.Repeat("字", 8001)})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("超长正文应被拒，得到 %d", res.StatusCode)
+	}
+}

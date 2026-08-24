@@ -250,6 +250,18 @@ curl -s -X POST $BASE/api/v1/photos/batch -H "$AUTH" -H 'Content-Type: applicati
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $BASE/api/v1/nodes/$NODE/photos -H "$AUTH" -F file=@photo.jpg
 ```
 
+### 信箱 · 写给以后的人
+
+首页角上挂着一只信箱。后台写一封信投进去，前台点信箱就能读——信封飞出、封口翻开、信纸三折展开。
+
+关键在于**投递时间**：每封信有一个 `deliver_at`，到点之前这封信在前台**完全不存在**——不是前端藏起来，而是 SQL 就过滤掉了，按 id 直取也是 404。所以可以今天写一封信，指定十年后的某天投递。
+
+- 有未读信时信箱旗子升起、投信口透出暖光，角标显示未读数
+- 读过的信封变灰、火漆印褪色，信仍留在信箱里
+- 后台顶栏的角标数的是「等着投」的信；每封标着「等着投 / 未读 / 已读」
+
+对应接口：`GET /letters`（前台，只回已投递的）、`GET /letters/{id}`（读并记下时刻）、`GET /admin/letters`（管理端，含未投递）、`POST|PATCH|DELETE /letters`。
+
 ## 导出：让这份档案能离开这套软件
 
 ```bash

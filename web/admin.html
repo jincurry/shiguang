@@ -503,6 +503,61 @@
   .t-empty{grid-column:1/-1;text-align:center;color:var(--faint);
     font-family:var(--mono);font-size:12px;letter-spacing:.15em;padding:60px 0;}
 
+  /* ============ 信箱 ============ */
+  .mail-head{
+    padding:22px 30px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  }
+  .mail-head h3{font-family:var(--serif);letter-spacing:.06em;}
+  .mail-head .hint{font-size:11px;color:var(--faint);}
+  .mail-list{padding:20px 30px 80px;display:flex;flex-direction:column;gap:12px;
+    max-width:860px;}
+  .lt-row{
+    display:flex;align-items:flex-start;gap:16px;
+    background:var(--bg-soft);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;
+  }
+  .lt-row.pending{border-color:rgba(217,160,91,.45);
+    background:linear-gradient(180deg,rgba(217,160,91,.07),transparent);}
+  .lt-main{flex:1;min-width:0;}
+  .lt-t{font-family:var(--serif);font-weight:600;font-size:16px;letter-spacing:.04em;}
+  .lt-when{
+    margin-top:5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+    color:var(--faint);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;
+  }
+  .lt-when .tag{padding:1px 8px;border-radius:10px;font-size:10px;}
+  .lt-when .tag.pending{background:rgba(217,160,91,.16);color:var(--amber);}
+  .lt-when .tag.unread{background:rgba(212,85,59,.16);color:var(--safelight);}
+  .lt-when .tag.read{background:rgba(127,166,90,.14);color:var(--ok);}
+  .lt-body{
+    margin-top:9px;color:var(--muted);font-size:13px;line-height:1.75;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .lt-ops{display:flex;gap:8px;flex:none;}
+  .lt-ops button{
+    font-size:12px;padding:5px 10px;border-radius:7px;
+    border:1px solid var(--line);color:var(--muted);
+    transition:color .2s,border-color .2s;
+  }
+  .lt-ops button:hover{color:var(--amber);border-color:var(--amber);}
+  .lt-ops button.danger:hover{color:#fff;background:var(--safelight);border-color:var(--safelight);}
+  .lt-empty{color:var(--faint);font-family:var(--mono);font-size:12px;
+    letter-spacing:.15em;padding:50px 0;text-align:center;}
+
+  /* 写信弹层 */
+  .letterbox .box{width:min(620px,94vw);}
+  .letterbox .f{display:flex;flex-direction:column;gap:7px;margin-top:14px;}
+  .letterbox label{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.2em;}
+  .letterbox textarea{
+    min-height:210px;resize:vertical;
+    font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
+    font-size:15.5px;line-height:1.95;
+  }
+  .letterbox .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .letterbox .cnt{margin-top:6px;font-family:var(--mono);font-size:10.5px;
+    color:var(--faint);letter-spacing:.1em;text-align:right;}
+  .letterbox .cnt.over{color:var(--safelight);}
+  @media (max-width:600px){ .letterbox .two{grid-template-columns:1fr;} }
+
   /* ============ 弹层 / Toast ============ */
   .modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
     background:rgba(14,12,10,.7);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);padding:24px;}
@@ -615,6 +670,7 @@
     <span class="topstats" id="stats"></span>
     <span class="sp"></span>
     <button class="icon-btn" id="themeBtn"><span class="ic">🔆</span><span class="tx">开灯</span></button>
+    <button class="icon-btn" id="mailBtn">✉ <span class="tx">信箱</span> <span class="badge" id="mailCount" hidden>0</span></button>
     <button class="icon-btn" id="trashBtn">🗑 <span class="tx">回收站</span> <span class="badge" id="trashCount" hidden>0</span></button>
     <button class="icon-btn" id="logoutBtn">⏻ <span class="tx">锁门退出</span></button>
   </div>
@@ -639,6 +695,18 @@
     </aside>
 
     <main class="detail" id="detail"></main>
+  </div>
+
+  <!-- 信箱视图 -->
+  <div id="mailView" style="display:none">
+    <div class="mail-head">
+      <button class="icon-btn" id="mailBack">← 返回</button>
+      <h3>信箱</h3>
+      <span class="mono hint">写给以后的人。设了投递时间的信，到点之前前台看不到</span>
+      <span style="flex:1"></span>
+      <button class="btn" id="newLetter">＋ 写一封</button>
+    </div>
+    <div class="mail-list" id="mailList"></div>
   </div>
 
   <!-- 回收站视图 -->
@@ -875,6 +943,7 @@ async function enterApp(){
   document.body.classList.add('in-app');
   state.sel = state.nodes[0]?.id || null;
   renderAll();
+  loadLetters();          /* 顶栏角标：还有几封等着投 */
 }
 $('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1939,11 +2008,189 @@ $('#newNode').addEventListener('click', async () => {
   }
 });
 
+/* ================= 信箱 ================= */
+state.letters = [];
+
+function fmtDeliver(v){
+  return (v || '').slice(0, 16).replace('T', ' ');
+}
+async function loadLetters(){
+  try{
+    const d = await api('/admin/letters');
+    state.letters = d.items || [];
+  }catch(err){
+    toast(errMsg(err, '信箱加载失败'), 'err');
+  }
+  renderMailBadge();
+}
+function renderMailBadge(){
+  /* 顶栏角标数的是「等着投」的信——已投出去的不需要提醒 */
+  const pending = state.letters.filter(l => l.pending).length;
+  const el = $('#mailCount');
+  el.hidden = !pending;
+  el.textContent = pending;
+}
+function renderLetters(){
+  const box = $('#mailList');
+  if(!state.letters.length){
+    box.innerHTML = '<div class="lt-empty">还没有写过信</div>';
+    return;
+  }
+  box.textContent = '';
+  state.letters.forEach(l => {
+    const row = document.createElement('div');
+    row.className = 'lt-row' + (l.pending ? ' pending' : '');
+
+    const main = document.createElement('div');
+    main.className = 'lt-main';
+    const t = document.createElement('div'); t.className = 'lt-t'; t.textContent = l.title;
+    const when = document.createElement('div'); when.className = 'lt-when';
+    const w = document.createElement('span');
+    w.textContent = (l.pending ? '将于 ' : '已投递 ') + fmtDeliver(l.deliver_at);
+    when.appendChild(w);
+    if(l.sender){
+      const f = document.createElement('span'); f.textContent = '落款 ' + l.sender;
+      when.appendChild(f);
+    }
+    const tag = document.createElement('span');
+    tag.className = 'tag ' + (l.pending ? 'pending' : (l.read_at ? 'read' : 'unread'));
+    tag.textContent = l.pending ? '等着投' : (l.read_at ? '已读' : '未读');
+    when.appendChild(tag);
+    const body = document.createElement('div'); body.className = 'lt-body'; body.textContent = l.body;
+    main.append(t, when, body);
+
+    const ops = document.createElement('div');
+    ops.className = 'lt-ops';
+    const edit = document.createElement('button'); edit.textContent = '✎ 改';
+    edit.onclick = () => letterBox(l);
+    const del = document.createElement('button'); del.className = 'danger'; del.textContent = '✕ 收回';
+    del.onclick = async () => {
+      if(!await confirmBox('收回这封信？', `「${l.title}」会从信箱里消失。`)) return;
+      try{
+        await api(`/letters/${l.id}`, {method: 'DELETE'});
+        state.letters = state.letters.filter(x => x.id !== l.id);
+        renderLetters(); renderMailBadge();
+        toast('已收回', 'ok');
+      }catch(err){
+        toast(errMsg(err, '收回失败'), 'err');
+      }
+    };
+    ops.append(edit, del);
+
+    row.append(main, ops);
+    box.appendChild(row);
+  });
+}
+
+/* 写信 / 改信弹层 */
+function letterBox(existing){
+  const wrap = document.createElement('div');
+  wrap.className = 'modal on letterbox';
+  wrap.innerHTML = `
+    <div class="box">
+      <h4>${existing ? '改这封信' : '写一封信'}</h4>
+      <p>投递时间到之前，这封信在前台不会出现——可以写给几年后的人。</p>
+      <div class="f">
+        <label for="ltTitle">标题（信封上写的）</label>
+        <input type="text" id="ltTitle" maxlength="120" placeholder="给十年后的你">
+      </div>
+      <div class="two">
+        <div class="f">
+          <label for="ltWhen">投递时间</label>
+          <input type="text" id="ltWhen" placeholder="留空 = 立刻投递" autocomplete="off">
+        </div>
+        <div class="f">
+          <label for="ltFrom">落款</label>
+          <input type="text" id="ltFrom" maxlength="60" placeholder="爸爸">
+        </div>
+      </div>
+      <div class="f">
+        <label for="ltBody">信的内容</label>
+        <textarea id="ltBody" maxlength="8000" placeholder="见字如面……"></textarea>
+        <div class="cnt"></div>
+      </div>
+      <div class="row">
+        <button class="btn ghost" data-x="cancel">取消</button>
+        <button class="btn" data-x="ok">${existing ? '保存' : '投进信箱'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const $$ = sel => wrap.querySelector(sel);
+  if(existing){
+    $$('#ltTitle').value = existing.title;
+    $$('#ltBody').value = existing.body;
+    $$('#ltFrom').value = existing.sender || '';
+    $$('#ltWhen').value = fmtDeliver(existing.deliver_at);
+  }
+  const ta = $$('#ltBody'), cnt = $$('.cnt');
+  const sync = () => {
+    const n = [...ta.value].length;
+    cnt.textContent = `${n} / 8000`;
+    cnt.classList.toggle('over', n > 8000);
+  };
+  ta.addEventListener('input', sync); sync();
+
+  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  const submit = async () => {
+    const body = {
+      title: $$('#ltTitle').value.trim(),
+      body: ta.value,
+      sender: $$('#ltFrom').value.trim(),
+      deliver_at: $$('#ltWhen').value.trim(),
+    };
+    if(!body.title){ toast('信总得有个标题', 'err'); return; }
+    if(!body.body.trim()){ toast('信的内容不能为空', 'err'); return; }
+    try{
+      const saved = existing
+        ? await api(`/letters/${existing.id}`, {method: 'PATCH', body})
+        : await api('/letters', {method: 'POST', body});
+      if(existing){
+        Object.assign(existing, saved);
+      }else{
+        state.letters.unshift(saved);
+      }
+      /* 投递时间变了会影响排序，重新拉一遍最省心 */
+      await loadLetters();
+      renderLetters();
+      close();
+      toast(existing ? '已保存' : (saved.pending ? '已放进信箱，到点自动投递' : '已投进信箱'), 'ok');
+    }catch(err){
+      toast(errMsg(err, '保存失败'), 'err');
+    }
+  };
+  const onKey = e => {
+    if(e.key === 'Escape') close();
+    if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+  };
+  document.addEventListener('keydown', onKey);
+  wrap.addEventListener('click', e => {
+    if(e.target === wrap) close();
+    const x = e.target.closest('[data-x]')?.dataset.x;
+    if(x === 'cancel') close();
+    if(x === 'ok') submit();
+  });
+  setTimeout(() => $$('#ltTitle').focus(), 30);
+}
+
+$('#mailBtn').addEventListener('click', async () => {
+  await loadLetters();
+  $('#mainView').style.display = 'none';
+  $('#trashView').style.display = 'none';
+  $('#mailView').style.display = 'block';
+  renderLetters();
+});
+$('#mailBack').addEventListener('click', () => {
+  $('#mailView').style.display = 'none';
+  $('#mainView').style.display = 'grid';
+});
+$('#newLetter').addEventListener('click', () => letterBox(null));
+
 /* ================= 回收站 ================= */
 $('#trashBtn').addEventListener('click', async () => {
   try{ state.trash = (await api('/trash')).items; }catch(_){}
   renderTrashBadge();
   $('#mainView').style.display = 'none';
+  $('#mailView').style.display = 'none';
   $('#trashView').style.display = 'block';
   renderTrash();
 });
