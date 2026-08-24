@@ -128,11 +128,17 @@ func (s *Server) Handler() http.Handler {
 				g.Get("/on-this-day", s.handleOnThisDay)
 				g.Get("/places", s.handlePlaces)
 				g.Get("/places/{place}", s.handleNodesAtPlace)
+				g.Get("/letters", s.handleLetters)
+				g.Get("/letters/{id}", s.handleGetLetter)
 			})
 			// 写接口（管理员）
 			api.Group(func(g chi.Router) {
 				g.Use(s.requireAuth)
 				g.Get("/photos/{id}/original", s.handleOriginal)
+				g.Get("/admin/letters", s.handleAdminLetters)
+				g.Post("/letters", s.handleCreateLetter)
+				g.Patch("/letters/{id}", s.handlePatchLetter)
+				g.Delete("/letters/{id}", s.handleDeleteLetter)
 				g.Post("/nodes", s.handleCreateNode)
 				g.Patch("/nodes/{id}", s.handlePatchNode)
 				g.Delete("/nodes/{id}", s.handleDeleteNode)
@@ -282,6 +288,79 @@ func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, meta.Reader); err != nil {
 		s.log.Warn("原图下载中断", "err", err)
 	}
+}
+
+// ===== 信箱 =====
+
+// handleLetters 前台信箱：只回已投递的信。未到投递时间的信在这里
+// 连标题都不会出现——过滤发生在 SQL，不是前端藏起来。
+func (s *Server) handleLetters(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.Letters(r.Context(), false)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	unread := 0
+	for _, l := range items {
+		if l.ReadAt == nil {
+			unread++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "unread": unread})
+}
+
+// handleGetLetter 读一封信，首次读取时记下时刻。
+func (s *Server) handleGetLetter(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.GetLetter(r.Context(), chi.URLParam(r, "id"), false, true)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAdminLetters 管理端列信，含尚未投递的。
+func (s *Server) handleAdminLetters(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.Letters(r.Context(), true)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleCreateLetter(w http.ResponseWriter, r *http.Request) {
+	var in service.LetterInput
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	out, err := s.svc.CreateLetter(r.Context(), in)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (s *Server) handlePatchLetter(w http.ResponseWriter, r *http.Request) {
+	var in service.LetterInput
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	out, err := s.svc.PatchLetter(r.Context(), chi.URLParam(r, "id"), in)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleDeleteLetter(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.DeleteLetter(r.Context(), chi.URLParam(r, "id")); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

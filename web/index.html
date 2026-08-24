@@ -723,6 +723,197 @@
   .lb-footer.hide-hint .lb-swipe-hint{opacity:0;}
   @media (hover:hover){.lb-swipe-hint{display:none;}}
 
+  /* ============ 信箱 ============
+     挂在页面角上的一只老式信箱。有没读过的信时旗子升起、投信口透出暖光。 */
+  .mailbox{
+    position:fixed;left:min(4vw,26px);bottom:26px;z-index:38;
+    width:66px;height:72px;padding:0;
+    display:none;place-items:end center;
+    filter:drop-shadow(0 6px 14px rgba(0,0,0,.45));
+    transition:transform .3s cubic-bezier(.3,.7,.35,1.3);
+  }
+  .mailbox.on{display:grid;}
+  .mailbox:hover{transform:translateY(-3px) rotate(-1.5deg);}
+  .mailbox:active{transform:translateY(0) scale(.97);}
+  body.light .mailbox{filter:drop-shadow(0 6px 14px rgba(90,75,55,.3));}
+  .mailbox svg{width:100%;height:100%;overflow:visible;}
+  .mb-body{fill:#3B3229;stroke:#5B4E3E;stroke-width:1.2;}
+  body.light .mb-body{fill:#8A7659;stroke:#6E5C43;}
+  .mb-slot{fill:#17130F;}
+  .mb-post{fill:#4A3F32;}
+  body.light .mb-post{fill:#6E5C43;}
+  /* 旗子：有未读信时立起来 */
+  .mb-flag{transform-origin:36.5px 44px;transform:rotate(-78deg);
+    transition:transform .55s cubic-bezier(.3,.7,.35,1.4);}
+  .mailbox.has .mb-flag{transform:rotate(0deg);}
+  .mb-flag rect{fill:var(--safelight);}
+  /* 投信口的光：只有未读时透出来 */
+  .mb-glow{opacity:0;transition:opacity .6s ease;}
+  .mailbox.has .mb-glow{opacity:1;animation:mbGlow 3.2s ease-in-out infinite;}
+  @keyframes mbGlow{0%,100%{opacity:.55;}50%{opacity:1;}}
+  .mailbox.has{animation:mbNudge 4.5s ease-in-out 1.5s infinite;}
+  @keyframes mbNudge{
+    0%,92%,100%{transform:none;}
+    94%{transform:rotate(-3deg);} 96%{transform:rotate(2.5deg);} 98%{transform:rotate(-1deg);}
+  }
+  .mb-count{
+    position:absolute;top:-4px;right:-6px;
+    min-width:19px;height:19px;padding:0 5px;border-radius:10px;
+    background:var(--safelight);color:#fff;
+    font-family:var(--mono);font-size:10.5px;line-height:19px;text-align:center;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);
+    opacity:0;transform:scale(.6);transition:opacity .3s,transform .3s;
+  }
+  .mailbox.has .mb-count{opacity:1;transform:none;}
+  @media (max-width:600px){
+    .mailbox{left:14px;bottom:74px;width:54px;height:60px;}
+  }
+
+  /* ---- 信件层：信封飞出 → 拆开 → 信纸展开 ---- */
+  .letters{
+    position:fixed;inset:0;z-index:97;display:none;
+    background:rgba(12,10,8,.86);
+    -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);
+    padding:24px;overflow-y:auto;
+  }
+  body.light .letters{background:rgba(240,235,225,.92);}
+  .letters.on{display:block;}
+  .lt-close{
+    position:absolute;top:20px;right:24px;z-index:3;
+    font-family:var(--mono);font-size:12px;letter-spacing:.2em;color:var(--muted);
+    padding:8px 10px;
+  }
+  .lt-close:hover{color:var(--ivory);}
+  .lt-head{
+    max-width:640px;margin:6vh auto 0;text-align:center;
+    font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--amber);
+  }
+  .lt-stack{max-width:640px;margin:26px auto 60px;display:flex;
+    flex-direction:column;gap:16px;}
+
+  /* 信封 */
+  .env{
+    position:relative;width:100%;aspect-ratio:16/9;max-height:210px;
+    border-radius:6px;cursor:pointer;text-align:left;
+    transition:max-height .5s cubic-bezier(.3,.7,.35,1),aspect-ratio .5s;
+    background:linear-gradient(160deg,#F3EADA,#E4D8C2);
+    box-shadow:0 8px 22px rgba(0,0,0,.4);
+    overflow:hidden;
+    animation:envIn .55s cubic-bezier(.25,.9,.35,1.1) backwards;
+    transition:transform .3s cubic-bezier(.3,.7,.35,1.2),box-shadow .3s;
+  }
+  .env:nth-child(1){animation-delay:.05s;} .env:nth-child(2){animation-delay:.14s;}
+  .env:nth-child(3){animation-delay:.23s;} .env:nth-child(n+4){animation-delay:.3s;}
+  @keyframes envIn{
+    /* 从信箱那个方向飞出来 */
+    from{opacity:0;transform:translate(-46vw,46vh) rotate(-18deg) scale(.5);}
+    to  {opacity:1;transform:none;}
+  }
+  .env:hover{transform:translateY(-4px) rotate(-.6deg);box-shadow:0 14px 30px rgba(0,0,0,.5);}
+  /* 信封的折线：两侧斜边 + 封口三角 */
+  .env::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:
+      linear-gradient(to bottom right,transparent 49.4%,rgba(120,100,70,.22) 49.6%,transparent 50%),
+      linear-gradient(to bottom left, transparent 49.4%,rgba(120,100,70,.22) 49.6%,transparent 50%);
+  }
+  .env-flap{
+    position:absolute;left:0;right:0;top:0;height:52%;
+    background:linear-gradient(180deg,#EFE4D0,#E2D5BC);
+    clip-path:polygon(0 0,100% 0,50% 100%);
+    transform-origin:top center;
+    box-shadow:0 2px 5px rgba(120,100,70,.18);
+    transition:transform .5s cubic-bezier(.3,.7,.35,1.1);
+  }
+  .env.open .env-flap{transform:rotateX(-172deg);}
+  /* 拆开后信封收成一条压在信纸上沿，像信纸被抽出来后随手搁在一旁 */
+  .env-wrap.open .env{
+    /* 只压高度，不动 aspect-ratio：内容都是绝对定位的，
+       改成 auto 会让信封塌成 0 高，连点都点不中 */
+    max-height:74px;
+    box-shadow:0 4px 10px rgba(0,0,0,.3);
+  }
+  .env-wrap.open .env:hover{transform:none;}
+  .env-wrap.open .env-flap{opacity:0;transition:opacity .3s ease .2s,transform .5s;}
+  .env-wrap.open .env-meta{bottom:12px;}
+  .env-wrap.open .env::before{opacity:.35;}
+  /* 火漆印 */
+  .env-seal{
+    position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);
+    width:34px;height:34px;border-radius:50%;
+    background:radial-gradient(circle at 36% 32%,#E0674B,#B33F27 62%,#8E2F1C);
+    box-shadow:0 2px 5px rgba(0,0,0,.35),inset 0 1px 2px rgba(255,255,255,.3);
+    display:grid;place-items:center;
+    font-family:var(--serif);font-size:14px;color:rgba(255,240,225,.9);
+    transition:transform .4s ease,opacity .4s ease;
+  }
+  .env.open .env-seal{transform:translate(-50%,-50%) scale(.4);opacity:0;}
+  .env-meta{
+    position:absolute;left:22px;right:22px;bottom:16px;z-index:2;
+    color:#5A4E3C;
+  }
+  .env-title{font-family:var(--serif);font-weight:600;font-size:17px;letter-spacing:.04em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .env-sub{margin-top:3px;font-family:var(--mono);font-size:10.5px;color:#8B7C63;
+    letter-spacing:.1em;display:flex;gap:10px;align-items:baseline;}
+  .env-new{color:var(--safelight);}
+  .env.read{background:linear-gradient(160deg,#EBE3D5,#DCD2BE);opacity:.86;}
+  .env.read .env-seal{background:radial-gradient(circle at 36% 32%,#B9A88C,#96866C 62%,#7A6B54);}
+
+  /* 信纸：从信封里抽出来，三折展开 */
+  .paper{
+    position:relative;margin-top:-10px;z-index:2;
+    background:
+      radial-gradient(120% 70% at 50% 0%,rgba(255,253,246,.7),transparent 65%),
+      var(--paper-raw);
+    border-radius:4px;
+    box-shadow:0 12px 30px rgba(0,0,0,.4);
+    padding:clamp(24px,5%,40px) clamp(22px,6%,44px);
+    transform-origin:top center;
+    display:none;
+  }
+  .env-wrap.open .paper{display:block;animation:unfold .78s cubic-bezier(.28,.85,.35,1) both;}
+  @keyframes unfold{
+    /* 先被抽出来（压扁、靠上），再一节一节展平 */
+    0%  {opacity:0;transform:perspective(1400px) rotateX(-88deg) scaleY(.35) translateY(-14px);}
+    38% {opacity:1;transform:perspective(1400px) rotateX(-44deg) scaleY(.7);}
+    72% {transform:perspective(1400px) rotateX(9deg) scaleY(1.02);}
+    100%{transform:none;}
+  }
+  .paper::after{
+    content:"";position:absolute;inset:0;pointer-events:none;border-radius:4px;
+    background-image:var(--grain);opacity:.2;mix-blend-mode:multiply;
+  }
+  /* 折痕：信纸原本是三折的 */
+  .paper::before{
+    content:"";position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;
+    background:linear-gradient(180deg,
+      transparent 32.6%,rgba(120,100,70,.14) 33%,transparent 33.4%,
+      transparent 66.2%,rgba(120,100,70,.14) 66.6%,transparent 67%);
+  }
+  .paper h4{
+    font-family:var(--serif);font-size:19px;letter-spacing:.05em;color:#4A4030;
+  }
+  .paper .when{
+    margin-top:6px;font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:#A2957E;
+    padding-bottom:12px;border-bottom:1px dashed rgba(120,105,80,.3);
+  }
+  .paper .text{
+    margin-top:18px;
+    font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
+    font-size:clamp(15px,2.5vw,17.5px);line-height:2.15;color:#544A3A;
+    white-space:pre-wrap;word-break:break-word;
+  }
+  .paper .from{
+    margin-top:22px;text-align:right;
+    font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
+    font-size:15px;color:#6B5F4C;
+  }
+  .lt-empty{
+    max-width:640px;margin:24px auto;text-align:center;
+    font-family:var(--mono);font-size:12px;letter-spacing:.15em;color:var(--faint);
+  }
+
   /* 回到顶部：逆序时间轴越翻越远，回头看最近的照片得一路滚回去 */
   .totop{
     position:fixed;right:min(4vw,26px);bottom:26px;z-index:38;
@@ -847,6 +1038,34 @@
     <span class="lb-swipe-hint">滑动切换 · 下滑关闭 · 双击放大</span>
     <span class="lb-flip-hint" id="lbFlipHint" hidden>F 翻到背面</span>
   </div>
+</div>
+<button class="mailbox" id="mailbox" aria-label="信箱" title="信箱">
+  <span class="mb-count" id="mbCount">0</span>
+  <svg viewBox="0 0 58 64" aria-hidden="true">
+    <!-- 立柱 -->
+    <rect class="mb-post" x="20" y="43" width="7" height="21" rx="1.5"/>
+    <!-- 旗杆与旗子：挂在箱体右侧 -->
+    <g class="mb-flag">
+      <rect class="mb-post" x="35.5" y="18" width="2" height="26" rx="1"/>
+      <rect x="37" y="19" width="10" height="7" rx="1"/>
+    </g>
+    <!-- 箱体：左侧竖直、顶上一道圆弧，像真的信箱 -->
+    <path class="mb-body" d="M4 44V28.5A13.5 13.5 0 0 1 31 28.5V44Z"/>
+    <!-- 门缝 -->
+    <path d="M4 39.5H31" stroke="rgba(0,0,0,.28)" stroke-width="1" fill="none"/>
+    <!-- 投信口与透出的光 -->
+    <rect class="mb-slot" x="9.5" y="32" width="16" height="3.6" rx="1.8"/>
+    <g class="mb-glow">
+      <rect x="9.5" y="32" width="16" height="3.6" rx="1.8" fill="#FFC489"/>
+      <rect x="6.5" y="29.6" width="22" height="8.4" rx="4.2" fill="#F0A56B" opacity=".3"/>
+      <rect x="3" y="27" width="29" height="14" rx="7" fill="#F0A56B" opacity=".14"/>
+    </g>
+  </svg>
+</button>
+<div class="letters" id="letters" role="dialog" aria-modal="true" aria-label="信箱">
+  <button class="lt-close" id="ltClose">ESC 关闭</button>
+  <p class="lt-head" id="ltHead">信箱</p>
+  <div class="lt-stack" id="ltStack"></div>
 </div>
 <button class="totop" id="toTop" aria-label="回到顶部" title="回到最近的日子">↑</button>
 <div class="placebox" id="placeBox" role="dialog" aria-modal="true" aria-label="这个地点的其它日子">
@@ -1351,6 +1570,137 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if(e.key === 'Escape' && placeBox.classList.contains('on')) closePlace();
+});
+
+/* ================= 信箱 =================
+   有信才出现。未到投递时间的信在服务端就被挡掉了，前端拿到的都是能读的。 */
+const mailbox  = document.getElementById('mailbox');
+const lettersEl= document.getElementById('letters');
+const ltStack  = document.getElementById('ltStack');
+let letters = [], lettersLoaded = false;
+
+function paintMailbox(){
+  const unread = letters.filter(l => !l.read_at).length;
+  mailbox.classList.toggle('on', letters.length > 0);
+  mailbox.classList.toggle('has', unread > 0);
+  document.getElementById('mbCount').textContent = unread;
+  mailbox.setAttribute('aria-label',
+    unread ? `信箱：${unread} 封未读` : `信箱：${letters.length} 封信`);
+}
+
+async function loadLetters(){
+  try{
+    const res = await fetch(`${API}/letters`);
+    if(!res.ok) return;
+    const data = await res.json();
+    letters = data.items || [];
+    lettersLoaded = true;
+    paintMailbox();
+  }catch(_){}
+}
+
+function renderLetters(){
+  ltStack.textContent = '';
+  document.getElementById('ltHead').textContent =
+    letters.length ? `信箱 · ${letters.length} 封` : '信箱';
+  if(!letters.length){
+    const p = document.createElement('p');
+    p.className = 'lt-empty';
+    p.textContent = '信箱是空的';
+    ltStack.appendChild(p);
+    return;
+  }
+  letters.forEach(l => {
+    const wrap = document.createElement('div');
+    wrap.className = 'env-wrap';
+
+    const env = document.createElement('button');
+    env.className = 'env' + (l.read_at ? ' read' : '');
+    env.type = 'button';
+    env.setAttribute('aria-expanded', 'false');
+    const flap = document.createElement('span'); flap.className = 'env-flap';
+    const seal = document.createElement('span'); seal.className = 'env-seal'; seal.textContent = '拾';
+    const meta = document.createElement('span'); meta.className = 'env-meta';
+    const t = document.createElement('span'); t.className = 'env-title'; t.textContent = l.title;
+    const sub = document.createElement('span'); sub.className = 'env-sub';
+    const when = document.createElement('span'); when.textContent = l.deliver_at.slice(0, 10);
+    sub.appendChild(when);
+    if(l.sender){
+      const from = document.createElement('span'); from.textContent = '来自 ' + l.sender;
+      sub.appendChild(from);
+    }
+    if(!l.read_at){
+      const nw = document.createElement('span'); nw.className = 'env-new'; nw.textContent = '● 未读';
+      sub.appendChild(nw);
+    }
+    meta.append(t, sub);
+    env.append(flap, seal, meta);
+
+    const paper = document.createElement('div');
+    paper.className = 'paper';
+    const h = document.createElement('h4'); h.textContent = l.title;
+    const w = document.createElement('p'); w.className = 'when';
+    w.textContent = l.deliver_at.slice(0, 10).replace(/-/g, ' / ');
+    const body = document.createElement('div'); body.className = 'text'; body.textContent = l.body;
+    paper.append(h, w, body);
+    if(l.sender){
+      const f = document.createElement('p'); f.className = 'from'; f.textContent = '—— ' + l.sender;
+      paper.appendChild(f);
+    }
+
+    env.addEventListener('click', () => openLetter(wrap, env, l));
+    wrap.append(env, paper);
+    ltStack.appendChild(wrap);
+  });
+}
+
+/* 拆信：封口翻开 → 信纸抽出展开；再点一次折回 */
+async function openLetter(wrap, env, l){
+  const opening = !wrap.classList.contains('open');
+  if(!opening){
+    wrap.classList.remove('open');
+    env.classList.remove('open');
+    env.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  env.classList.add('open');
+  env.setAttribute('aria-expanded', 'true');
+  /* 封口先翻开，信纸随后抽出来 */
+  setTimeout(() => {
+    wrap.classList.add('open');
+    wrap.querySelector('.paper')?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest'});
+  }, reduceMotion ? 0 : 260);
+
+  if(l.read_at) return;
+  try{
+    const res = await fetch(`${API}/letters/${encodeURIComponent(l.id)}`);
+    if(!res.ok) return;
+    const fresh = await res.json();
+    l.read_at = fresh.read_at;
+    env.classList.add('read');
+    env.querySelector('.env-new')?.remove();
+    paintMailbox();
+  }catch(_){}
+}
+
+async function openMailbox(){
+  if(!lettersLoaded) await loadLetters();
+  renderLetters();
+  lettersEl.classList.add('on');
+  document.documentElement.style.overflow = 'hidden';
+  setTimeout(() => document.getElementById('ltClose').focus(), 0);
+}
+function closeMailbox(){
+  lettersEl.classList.remove('on');
+  document.documentElement.style.overflow = '';
+  mailbox.focus();
+}
+mailbox.addEventListener('click', openMailbox);
+document.getElementById('ltClose').addEventListener('click', closeMailbox);
+lettersEl.addEventListener('click', e => { if(e.target === lettersEl) closeMailbox(); });
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && lettersEl.classList.contains('on')) closeMailbox();
 });
 
 /* ================= 那年今日 ================= */
@@ -2065,6 +2415,7 @@ addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); 
 /* ================= 首屏加载 ================= */
 loadPage().then(() => sentinelIO.observe(sentinel));
 loadOnThisDay();
+loadLetters();
 </script>
 </body>
 </html>
