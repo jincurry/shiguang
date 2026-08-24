@@ -24,8 +24,8 @@
   }
   body.light{
     --bg:#EFEAE0; --bg-soft:#F7F3EA; --panel:#F5F1E8;
-    --ivory:#2E2A24; --muted:#7C7263; --faint:#A89D8B;
-    --amber:#8F6A2A; --safelight:#C24A32; --ok:#5E7F3F;
+    --ivory:#2E2A24; --muted:#6E6455; --faint:#8C8171;
+    --amber:#82601F; --safelight:#C24A32; --ok:#5E7F3F;
     --line:#DCD4C4; --hairline:rgba(190,178,156,.6);
     --field:#FFFDF8; --field-line:#D6CCB8;
     --print:#FFFDF8; --paper-raw:#EFE9DA;
@@ -52,7 +52,10 @@
   body.light::after{opacity:.035;}
   /* 亮色下的深色硬编码组件覆盖 */
   body.light .topbar{background:rgba(239,234,224,.88);}
-  body.light .btn{color:#FBF6EA;}
+  /* 亮色下主按钮的琥珀底变深，文字得浅。但这条只能管实底的主按钮：
+     写成 body.light .btn 的话特异性 (0,2,1) 会压过 .btn.ghost (0,2,0)，
+     把透明底的「取消」也刷成近白色——在浅色弹层上就看不见了。 */
+  body.light .btn:not(.ghost):not(.danger){color:#FBF6EA;}
   body.light .btn.danger{background:rgba(194,74,50,.12);color:#A93A24;border-color:rgba(194,74,50,.5);}
   body.light .btn.danger:hover{background:var(--safelight);color:#fff;border-color:var(--safelight);}
   body.light .ops button{background:rgba(255,253,246,.9);color:var(--ivory);
@@ -129,8 +132,11 @@
     border-radius:8px;padding:10px 18px;transition:filter .2s,transform .1s;
   }
   .btn:hover{filter:brightness(1.08);} .btn:active{transform:translateY(1px);}
-  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);}
-  .btn.ghost:hover{color:var(--ivory);border-color:var(--muted);}
+  .btn.ghost{
+    background:transparent;color:var(--ivory);
+    border:1px solid var(--line);opacity:.82;
+  }
+  .btn.ghost:hover{opacity:1;border-color:var(--muted);}
   .btn.danger{background:rgba(212,85,59,.18);color:#F2937B;border:1px solid rgba(212,85,59,.65);}
   .btn.danger:hover{background:var(--safelight);color:#fff;border-color:var(--safelight);filter:none;}
   .door .hint{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em;}
