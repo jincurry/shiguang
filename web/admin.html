@@ -398,7 +398,9 @@
   .card.noted-on .noted{display:block;}
 
   /* 手记编辑弹层 */
-  .noteboxwrap .box{width:min(560px,94vw);}
+  /* 特异性要压过后面的 .modal .box（同为 (0,2,0) 时后定义者胜），
+     否则这里的加宽根本不生效，框仍是 400px */
+  .modal.noteboxwrap .box{width:min(560px,94vw);}
   .noteboxwrap textarea{
     width:100%;min-height:200px;margin-top:14px;resize:vertical;
     font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
@@ -550,15 +552,16 @@
     letter-spacing:.15em;padding:50px 0;text-align:center;}
 
   /* 写信弹层 */
-  .letterbox .box{width:min(620px,94vw);}
-  .letterbox .f{display:flex;flex-direction:column;gap:7px;margin-top:14px;}
+  .modal.letterbox .box{width:min(620px,94vw);}
+  .letterbox .f{display:flex;flex-direction:column;gap:7px;margin-top:14px;min-width:0;}
+  .letterbox input,.letterbox textarea{width:100%;}
   .letterbox label{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.2em;}
   .letterbox textarea{
     min-height:210px;resize:vertical;
     font-family:'Kaiti SC','KaiTi','STKaiti',var(--serif);
     font-size:15.5px;line-height:1.95;
   }
-  .letterbox .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .letterbox .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;}
   .letterbox .cnt{margin-top:6px;font-family:var(--mono);font-size:10.5px;
     color:var(--faint);letter-spacing:.1em;text-align:right;}
   .letterbox .cnt.over{color:var(--safelight);}
@@ -571,6 +574,8 @@
   .modal .box{
     width:min(400px,92vw);background:var(--panel);border:1px solid var(--line);
     border-radius:12px;padding:26px;box-shadow:0 30px 70px rgba(0,0,0,.5);
+    max-width:calc(100vw - 32px);max-height:calc(100vh - 48px);
+    overflow-y:auto;                     /* 内容再多也待在框里 */
   }
   .modal h4{font-family:var(--serif);font-size:17px;letter-spacing:.04em;}
   .modal p{margin-top:8px;color:var(--muted);font-size:13.5px;}
