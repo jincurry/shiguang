@@ -727,7 +727,7 @@
      挂在页面角上的一只老式信箱。有没读过的信时旗子升起、投信口透出暖光。 */
   .mailbox{
     position:fixed;left:min(4vw,26px);bottom:26px;z-index:38;
-    width:74px;height:80px;padding:0;
+    width:82px;height:88px;padding:0;
     display:none;place-items:end center;
     filter:drop-shadow(0 6px 14px rgba(0,0,0,.45));
     transition:transform .3s cubic-bezier(.3,.7,.35,1.3);
@@ -737,42 +737,45 @@
   .mailbox:active{transform:translateY(0) scale(.97);}
   body.light .mailbox{filter:drop-shadow(0 6px 14px rgba(90,75,55,.3));}
   .mailbox svg{width:100%;height:100%;overflow:visible;}
-  /* 箱身渐变：上受光、下沉入暗处 */
-  .mb-s1{stop-color:#6B5942;} .mb-s2{stop-color:#4C4030;} .mb-s3{stop-color:#332B20;}
-  .mb-p1{stop-color:#2E2820;} .mb-p2{stop-color:#4A4032;} .mb-p3{stop-color:#251F19;}
-  .mb-post-f{fill:#2A241D;}
-  .mb-hi{stroke:rgba(255,228,180,.28);}
-  .mb-seam{stroke:rgba(0,0,0,.42);}
-  .mb-shade{fill:rgba(0,0,0,.4);}
-  .mb-knob{fill:#8E7A57;}
-  .mb-edge{stroke:rgba(255,225,180,.14);}
-  body.light .mb-edge{stroke:rgba(70,55,35,.22);}
-  .mb-slot{fill:#120F0C;}
-  .mb-slot-hi{stroke:rgba(255,230,190,.16);}
-  .mb-pole{fill:#6E5F49;}
+  /* 三面各自的受光：正面板象牙白、顶面最亮、右侧壁背光 */
+  .mb-f1{stop-color:#F3ECDD;} .mb-f2{stop-color:#E4DAC4;} .mb-f3{stop-color:#CFC3A8;}
+  .mb-t1{stop-color:#E9E0CB;} .mb-t2{stop-color:#FBF6EA;}
+  .mb-d1{stop-color:#BBAF95;} .mb-d2{stop-color:#95886E;}
+  /* 铜饰边 */
+  .mb-b1{stop-color:#F0CE8E;} .mb-b2{stop-color:#C9A159;} .mb-b3{stop-color:#8E6C31;}
+  /* 木柱 */
+  .mb-w1{stop-color:#3A2C1F;} .mb-w2{stop-color:#5C4630;} .mb-w3{stop-color:#2E2318;}
+  .mb-wood-d{fill:rgba(0,0,0,.35);}
+  .mb-wood-l{fill:rgba(255,232,190,.16);}
+  .mb-rim{stroke:url(#mbBrass);}
+  .mb-rim-in{stroke:rgba(255,240,205,.42);}
+  .mb-rim-f{fill:url(#mbBrass);}
+  .mb-slot{fill:#241C12;}
+  .mb-slot-hi{stroke:rgba(255,235,195,.35);}
+  .mb-emb rect{fill:none;stroke:url(#mbBrass);stroke-width:1.1;}
+  .mb-emb-l{stroke:#C9A159;}
+  .mb-hinge{fill:url(#mbBrass);}
+  .mb-hinge-in{fill:rgba(80,58,26,.7);}
   .mb-flagcloth{fill:var(--safelight);}
-  body.light{
-    --mb-hi:rgba(255,255,255,.55);
-  }
-  body.light .mb-s1{stop-color:#C6AC83;} body.light .mb-s2{stop-color:#A98F68;}
-  body.light .mb-s3{stop-color:#8A7351;}
-  body.light .mb-p1{stop-color:#7A6647;} body.light .mb-p2{stop-color:#9B8362;}
-  body.light .mb-p3{stop-color:#6B5940;}
-  body.light .mb-post-f{fill:#75613F;}
-  body.light .mb-hi{stroke:rgba(255,250,235,.6);}
-  body.light .mb-seam{stroke:rgba(70,55,35,.35);}
-  body.light .mb-shade{fill:rgba(70,55,35,.28);}
-  body.light .mb-knob{fill:#F0E2C4;}
-  body.light .mb-slot{fill:#3A2F22;}
-  body.light .mb-pole{fill:#8A7455;}
+  .mb-flag-sh{fill:none;stroke:rgba(90,20,10,.5);stroke-width:.8;}
+  /* 亮色主题：箱体提亮、铜边压深，免得糊进浅色背景 */
+  body.light .mb-f1{stop-color:#FFFCF4;} body.light .mb-f2{stop-color:#F2E9D6;}
+  body.light .mb-f3{stop-color:#DCD0B6;}
+  body.light .mb-t1{stop-color:#F5EEDC;} body.light .mb-t2{stop-color:#FFFEF9;}
+  body.light .mb-d1{stop-color:#B4A78C;} body.light .mb-d2{stop-color:#8C7F66;}
+  body.light .mb-b1{stop-color:#DCB469;} body.light .mb-b2{stop-color:#A9833C;}
+  body.light .mb-b3{stop-color:#6F5220;}
+  body.light .mb-w1{stop-color:#4A3826;} body.light .mb-w2{stop-color:#6B5238;}
+  body.light .mb-w3{stop-color:#3B2C1D;}
+  body.light .mb-slot{fill:#3A2C1C;}
   /* 旗子：有未读信时立起来 */
   .mb-flag{
-    transform-origin:46.7px 49px;
-    transform:rotate(104deg) scaleY(.5);
+    transform-origin:57.6px 60px;
+    transform:rotate(96deg) scaleY(.46);
     transition:transform .6s cubic-bezier(.3,.7,.35,1.5);
   }
   .mailbox.has .mb-flag{transform:rotate(0deg) scaleY(1);}
-  .mailbox.has .mb-flagcloth{animation:mbWave 2.8s ease-in-out infinite;transform-origin:47.8px 26px;}
+  .mailbox.has .mb-flagcloth{animation:mbWave 2.8s ease-in-out infinite;transform-origin:58.8px 33px;}
   @keyframes mbWave{0%,100%{transform:skewY(0deg);}50%{transform:skewY(-3.5deg);}}
   /* 投信口的光：只有未读时透出来 */
   .mb-glow{opacity:0;transition:opacity .6s ease;}
@@ -793,7 +796,7 @@
   }
   .mailbox.has .mb-count{opacity:1;transform:none;}
   @media (max-width:600px){
-    .mailbox{left:14px;bottom:74px;width:60px;height:66px;}
+    .mailbox{left:14px;bottom:74px;width:68px;height:74px;}
   }
 
   /* ---- 信件层：信封飞出 → 拆开 → 信纸展开 ---- */
@@ -1068,57 +1071,81 @@
 </div>
 <button class="mailbox" id="mailbox" aria-label="信箱" title="信箱">
   <span class="mb-count" id="mbCount">0</span>
-  <svg viewBox="0 0 64 72" aria-hidden="true">
+  <svg viewBox="0 0 78 92" aria-hidden="true">
     <defs>
-      <!-- 箱身：上方受光、下方沉入暗处 -->
-      <linearGradient id="mbSkin" x1="0" y1="0" x2="0" y2="1">
-        <stop class="mb-s1" offset="0"/><stop class="mb-s2" offset=".46"/>
-        <stop class="mb-s3" offset="1"/>
+      <!-- 正面板：象牙白搪瓷，左上受光 -->
+      <linearGradient id="mbFace" x1=".15" y1="0" x2=".85" y2="1">
+        <stop class="mb-f1" offset="0"/><stop class="mb-f2" offset=".55"/>
+        <stop class="mb-f3" offset="1"/>
       </linearGradient>
-      <!-- 立柱：圆柱体的左暗右亮 -->
-      <linearGradient id="mbPost" x1="0" y1="0" x2="1" y2="0">
-        <stop class="mb-p1" offset="0"/><stop class="mb-p2" offset=".42"/>
-        <stop class="mb-p3" offset="1"/>
+      <!-- 顶面：转向光源，最亮 -->
+      <linearGradient id="mbTop" x1="0" y1="1" x2=".4" y2="0">
+        <stop class="mb-t1" offset="0"/><stop class="mb-t2" offset="1"/>
       </linearGradient>
-      <!-- 投信口里透出来的光 -->
+      <!-- 右侧壁：背光 -->
+      <linearGradient id="mbSide" x1="0" y1="0" x2="1" y2=".3">
+        <stop class="mb-d1" offset="0"/><stop class="mb-d2" offset="1"/>
+      </linearGradient>
+      <!-- 铜饰边 -->
+      <linearGradient id="mbBrass" x1="0" y1="0" x2=".7" y2="1">
+        <stop class="mb-b1" offset="0"/><stop class="mb-b2" offset=".45"/>
+        <stop class="mb-b3" offset="1"/>
+      </linearGradient>
+      <!-- 木柱：中间亮、两侧收暗 -->
+      <linearGradient id="mbWood" x1="0" y1="0" x2="1" y2="0">
+        <stop class="mb-w1" offset="0"/><stop class="mb-w2" offset=".42"/>
+        <stop class="mb-w3" offset="1"/>
+      </linearGradient>
       <radialGradient id="mbLight" cx=".5" cy=".5" r=".5">
-        <stop offset="0" stop-color="#FFCE96" stop-opacity=".95"/>
-        <stop offset=".55" stop-color="#F0A56B" stop-opacity=".38"/>
+        <stop offset="0" stop-color="#FFD9A8" stop-opacity=".95"/>
+        <stop offset=".5" stop-color="#F0A56B" stop-opacity=".4"/>
         <stop offset="1" stop-color="#F0A56B" stop-opacity="0"/>
       </radialGradient>
     </defs>
 
-    <!-- 底座与立柱 -->
-    <rect class="mb-post-f" x="14" y="66.5" width="22" height="5" rx="2.4"/>
-    <rect x="19" y="49" width="12" height="18.5" fill="url(#mbPost)"/>
+    <!-- ① 木柱与台座 -->
+    <rect x="27" y="70" width="15" height="22" fill="url(#mbWood)"/>
+    <path class="mb-wood-d" d="M27 70h15v1.6H27z"/>
+    <rect x="18" y="64.5" width="34" height="6" rx="1.4" fill="url(#mbWood)"/>
+    <rect class="mb-wood-l" x="18" y="64.5" width="34" height="1.6" rx=".8"/>
 
-    <!-- 旗：杆头带个小球，未读时立起 -->
-    <g class="mb-flag">
-      <rect class="mb-pole" x="45.6" y="20" width="2.2" height="29" rx="1.1"/>
-      <circle class="mb-pole" cx="46.7" cy="20.4" r="1.9"/>
-      <path class="mb-flagcloth" d="M47.8 22.2h13l-3.2 4.1 3.2 4.1h-13z"/>
-    </g>
+    <!-- ② 箱体：顶面 → 右侧壁 → 正面板，三面各自受光 -->
+    <path d="M9 36.5A18 14.5 0 0 1 45 36.5L58 30.5A18 14.5 0 0 0 22 30.5Z" fill="url(#mbTop)"/>
+    <path d="M45 36.5V63l13-6V30.5Z" fill="url(#mbSide)"/>
+    <path d="M9 63V36.5A18 14.5 0 0 1 45 36.5V63Z" fill="url(#mbFace)"/>
 
-    <!-- 箱身：扁拱顶的邮筒，比半圆顶耐看 -->
-    <path class="mb-edge" d="M3 49V36.5A21 14.5 0 0 1 45 36.5V49Z" fill="url(#mbSkin)"
-          stroke-width="1"/>
-    <!-- 顶上一道受光的高光弧 -->
-    <path class="mb-hi" d="M8 33.6A16.5 11 0 0 1 40 33.6" fill="none" stroke-width="2.6"
-          stroke-linecap="round"/>
-    <!-- 箱门缝与把手 -->
-    <path class="mb-seam" d="M3 44.4H45" stroke-width="1.1" fill="none"/>
-    <circle class="mb-knob" cx="24" cy="46.6" r="1.7"/>
-    <!-- 底沿的暗边，把箱身压在立柱上 -->
-    <path class="mb-shade" d="M3 49H45v1H3z"/>
+    <!-- ③ 铜饰边：沿正面板拱形一圈，外粗内细 -->
+    <path class="mb-rim" d="M9 62V36.5A18 14.5 0 0 1 45 36.5V62" fill="none" stroke-width="2.6"/>
+    <path class="mb-rim-in" d="M12.6 61V36.8A14.4 11.6 0 0 1 41.4 36.8V61" fill="none" stroke-width="1"/>
+    <!-- 底沿一条铜条，把箱体压在台座上 -->
+    <rect class="mb-rim-f" x="8" y="60.4" width="38" height="3" rx="1.2"/>
 
-    <!-- 投信口：内凹的深槽 + 上沿一线高光 -->
-    <rect class="mb-slot" x="10.5" y="36.5" width="27" height="4.4" rx="2.2"/>
-    <path class="mb-slot-hi" d="M12.2 36.2h23.6" stroke-width="1" fill="none" stroke-linecap="round"/>
-    <!-- 有未读信时，槽里透出光 -->
+    <!-- ④ 投信口：铜框内凹深槽 -->
+    <rect class="mb-rim-f" x="14.5" y="40.6" width="26" height="6.4" rx="3.2"/>
+    <rect class="mb-slot" x="16.2" y="42.2" width="22.6" height="3.2" rx="1.6"/>
+    <path class="mb-slot-hi" d="M17.4 41.9h20.2" stroke-width=".8" fill="none" stroke-linecap="round"/>
     <g class="mb-glow">
-      <rect x="11.1" y="37" width="25.8" height="3.4" rx="1.7" fill="#FFD3A0"/>
-      <ellipse cx="24" cy="38.7" rx="26" ry="12" fill="url(#mbLight)"/>
+      <rect x="16.6" y="42.5" width="21.8" height="2.6" rx="1.3" fill="#FFE3BC"/>
+      <ellipse cx="27.5" cy="43.8" rx="30" ry="15" fill="url(#mbLight)"/>
     </g>
+
+    <!-- ⑤ 正面的信封徽与把手 -->
+    <g class="mb-emb">
+      <rect x="20" y="49.8" width="15" height="8.4" rx="1"/>
+      <path class="mb-emb-l" d="M20.6 50.7l6.9 4.6 6.9-4.6" fill="none" stroke-width=".9"
+            stroke-linejoin="round"/>
+    </g>
+
+    <!-- ⑥ 旗：铜杆 + 铜轴座 + 红旗 -->
+    <g class="mb-flag">
+      <rect class="mb-rim-f" x="56.4" y="26" width="2.4" height="34" rx="1.2"/>
+      <circle class="mb-rim-f" cx="57.6" cy="26.4" r="2.2"/>
+      <path class="mb-flagcloth" d="M58.8 28.4h15.4l-3.4 4.6 3.4 4.6H58.8z"/>
+      <path class="mb-flag-sh" d="M58.8 28.4h15.4l-3.4 4.6 3.4 4.6H58.8z" opacity=".22"/>
+    </g>
+    <!-- 轴座压在箱侧 -->
+    <circle class="mb-hinge" cx="52" cy="45" r="4"/>
+    <circle class="mb-hinge-in" cx="52" cy="45" r="1.7"/>
   </svg>
 </button>
 <div class="letters" id="letters" role="dialog" aria-modal="true" aria-label="信箱">
