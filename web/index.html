@@ -727,7 +727,7 @@
      挂在页面角上的一只老式信箱。有没读过的信时旗子升起、投信口透出暖光。 */
   .mailbox{
     position:fixed;left:min(4vw,26px);bottom:26px;z-index:38;
-    width:66px;height:72px;padding:0;
+    width:74px;height:80px;padding:0;
     display:none;place-items:end center;
     filter:drop-shadow(0 6px 14px rgba(0,0,0,.45));
     transition:transform .3s cubic-bezier(.3,.7,.35,1.3);
@@ -737,16 +737,43 @@
   .mailbox:active{transform:translateY(0) scale(.97);}
   body.light .mailbox{filter:drop-shadow(0 6px 14px rgba(90,75,55,.3));}
   .mailbox svg{width:100%;height:100%;overflow:visible;}
-  .mb-body{fill:#3B3229;stroke:#5B4E3E;stroke-width:1.2;}
-  body.light .mb-body{fill:#8A7659;stroke:#6E5C43;}
-  .mb-slot{fill:#17130F;}
-  .mb-post{fill:#4A3F32;}
-  body.light .mb-post{fill:#6E5C43;}
+  /* 箱身渐变：上受光、下沉入暗处 */
+  .mb-s1{stop-color:#6B5942;} .mb-s2{stop-color:#4C4030;} .mb-s3{stop-color:#332B20;}
+  .mb-p1{stop-color:#2E2820;} .mb-p2{stop-color:#4A4032;} .mb-p3{stop-color:#251F19;}
+  .mb-post-f{fill:#2A241D;}
+  .mb-hi{stroke:rgba(255,228,180,.28);}
+  .mb-seam{stroke:rgba(0,0,0,.42);}
+  .mb-shade{fill:rgba(0,0,0,.4);}
+  .mb-knob{fill:#8E7A57;}
+  .mb-edge{stroke:rgba(255,225,180,.14);}
+  body.light .mb-edge{stroke:rgba(70,55,35,.22);}
+  .mb-slot{fill:#120F0C;}
+  .mb-slot-hi{stroke:rgba(255,230,190,.16);}
+  .mb-pole{fill:#6E5F49;}
+  .mb-flagcloth{fill:var(--safelight);}
+  body.light{
+    --mb-hi:rgba(255,255,255,.55);
+  }
+  body.light .mb-s1{stop-color:#C6AC83;} body.light .mb-s2{stop-color:#A98F68;}
+  body.light .mb-s3{stop-color:#8A7351;}
+  body.light .mb-p1{stop-color:#7A6647;} body.light .mb-p2{stop-color:#9B8362;}
+  body.light .mb-p3{stop-color:#6B5940;}
+  body.light .mb-post-f{fill:#75613F;}
+  body.light .mb-hi{stroke:rgba(255,250,235,.6);}
+  body.light .mb-seam{stroke:rgba(70,55,35,.35);}
+  body.light .mb-shade{fill:rgba(70,55,35,.28);}
+  body.light .mb-knob{fill:#F0E2C4;}
+  body.light .mb-slot{fill:#3A2F22;}
+  body.light .mb-pole{fill:#8A7455;}
   /* 旗子：有未读信时立起来 */
-  .mb-flag{transform-origin:36.5px 44px;transform:rotate(-78deg);
-    transition:transform .55s cubic-bezier(.3,.7,.35,1.4);}
-  .mailbox.has .mb-flag{transform:rotate(0deg);}
-  .mb-flag rect{fill:var(--safelight);}
+  .mb-flag{
+    transform-origin:46.7px 49px;
+    transform:rotate(104deg) scaleY(.5);
+    transition:transform .6s cubic-bezier(.3,.7,.35,1.5);
+  }
+  .mailbox.has .mb-flag{transform:rotate(0deg) scaleY(1);}
+  .mailbox.has .mb-flagcloth{animation:mbWave 2.8s ease-in-out infinite;transform-origin:47.8px 26px;}
+  @keyframes mbWave{0%,100%{transform:skewY(0deg);}50%{transform:skewY(-3.5deg);}}
   /* 投信口的光：只有未读时透出来 */
   .mb-glow{opacity:0;transition:opacity .6s ease;}
   .mailbox.has .mb-glow{opacity:1;animation:mbGlow 3.2s ease-in-out infinite;}
@@ -757,7 +784,7 @@
     94%{transform:rotate(-3deg);} 96%{transform:rotate(2.5deg);} 98%{transform:rotate(-1deg);}
   }
   .mb-count{
-    position:absolute;top:-4px;right:-6px;
+    position:absolute;top:-2px;left:-6px;
     min-width:19px;height:19px;padding:0 5px;border-radius:10px;
     background:var(--safelight);color:#fff;
     font-family:var(--mono);font-size:10.5px;line-height:19px;text-align:center;
@@ -766,7 +793,7 @@
   }
   .mailbox.has .mb-count{opacity:1;transform:none;}
   @media (max-width:600px){
-    .mailbox{left:14px;bottom:74px;width:54px;height:60px;}
+    .mailbox{left:14px;bottom:74px;width:60px;height:66px;}
   }
 
   /* ---- 信件层：信封飞出 → 拆开 → 信纸展开 ---- */
@@ -1041,24 +1068,56 @@
 </div>
 <button class="mailbox" id="mailbox" aria-label="信箱" title="信箱">
   <span class="mb-count" id="mbCount">0</span>
-  <svg viewBox="0 0 58 64" aria-hidden="true">
-    <!-- 立柱 -->
-    <rect class="mb-post" x="20" y="43" width="7" height="21" rx="1.5"/>
-    <!-- 旗杆与旗子：挂在箱体右侧 -->
+  <svg viewBox="0 0 64 72" aria-hidden="true">
+    <defs>
+      <!-- 箱身：上方受光、下方沉入暗处 -->
+      <linearGradient id="mbSkin" x1="0" y1="0" x2="0" y2="1">
+        <stop class="mb-s1" offset="0"/><stop class="mb-s2" offset=".46"/>
+        <stop class="mb-s3" offset="1"/>
+      </linearGradient>
+      <!-- 立柱：圆柱体的左暗右亮 -->
+      <linearGradient id="mbPost" x1="0" y1="0" x2="1" y2="0">
+        <stop class="mb-p1" offset="0"/><stop class="mb-p2" offset=".42"/>
+        <stop class="mb-p3" offset="1"/>
+      </linearGradient>
+      <!-- 投信口里透出来的光 -->
+      <radialGradient id="mbLight" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#FFCE96" stop-opacity=".95"/>
+        <stop offset=".55" stop-color="#F0A56B" stop-opacity=".38"/>
+        <stop offset="1" stop-color="#F0A56B" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    <!-- 底座与立柱 -->
+    <rect class="mb-post-f" x="14" y="66.5" width="22" height="5" rx="2.4"/>
+    <rect x="19" y="49" width="12" height="18.5" fill="url(#mbPost)"/>
+
+    <!-- 旗：杆头带个小球，未读时立起 -->
     <g class="mb-flag">
-      <rect class="mb-post" x="35.5" y="18" width="2" height="26" rx="1"/>
-      <rect x="37" y="19" width="10" height="7" rx="1"/>
+      <rect class="mb-pole" x="45.6" y="20" width="2.2" height="29" rx="1.1"/>
+      <circle class="mb-pole" cx="46.7" cy="20.4" r="1.9"/>
+      <path class="mb-flagcloth" d="M47.8 22.2h13l-3.2 4.1 3.2 4.1h-13z"/>
     </g>
-    <!-- 箱体：左侧竖直、顶上一道圆弧，像真的信箱 -->
-    <path class="mb-body" d="M4 44V28.5A13.5 13.5 0 0 1 31 28.5V44Z"/>
-    <!-- 门缝 -->
-    <path d="M4 39.5H31" stroke="rgba(0,0,0,.28)" stroke-width="1" fill="none"/>
-    <!-- 投信口与透出的光 -->
-    <rect class="mb-slot" x="9.5" y="32" width="16" height="3.6" rx="1.8"/>
+
+    <!-- 箱身：扁拱顶的邮筒，比半圆顶耐看 -->
+    <path class="mb-edge" d="M3 49V36.5A21 14.5 0 0 1 45 36.5V49Z" fill="url(#mbSkin)"
+          stroke-width="1"/>
+    <!-- 顶上一道受光的高光弧 -->
+    <path class="mb-hi" d="M8 33.6A16.5 11 0 0 1 40 33.6" fill="none" stroke-width="2.6"
+          stroke-linecap="round"/>
+    <!-- 箱门缝与把手 -->
+    <path class="mb-seam" d="M3 44.4H45" stroke-width="1.1" fill="none"/>
+    <circle class="mb-knob" cx="24" cy="46.6" r="1.7"/>
+    <!-- 底沿的暗边，把箱身压在立柱上 -->
+    <path class="mb-shade" d="M3 49H45v1H3z"/>
+
+    <!-- 投信口：内凹的深槽 + 上沿一线高光 -->
+    <rect class="mb-slot" x="10.5" y="36.5" width="27" height="4.4" rx="2.2"/>
+    <path class="mb-slot-hi" d="M12.2 36.2h23.6" stroke-width="1" fill="none" stroke-linecap="round"/>
+    <!-- 有未读信时，槽里透出光 -->
     <g class="mb-glow">
-      <rect x="9.5" y="32" width="16" height="3.6" rx="1.8" fill="#FFC489"/>
-      <rect x="6.5" y="29.6" width="22" height="8.4" rx="4.2" fill="#F0A56B" opacity=".3"/>
-      <rect x="3" y="27" width="29" height="14" rx="7" fill="#F0A56B" opacity=".14"/>
+      <rect x="11.1" y="37" width="25.8" height="3.4" rx="1.7" fill="#FFD3A0"/>
+      <ellipse cx="24" cy="38.7" rx="26" ry="12" fill="url(#mbLight)"/>
     </g>
   </svg>
 </button>
