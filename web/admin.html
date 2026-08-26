@@ -882,7 +882,11 @@ function confirmBox(title, body){
   return new Promise(res => {
     $('#mTitle').textContent = title; $('#mBody').textContent = body;
     $('#modal').classList.add('on');
-    const done = v => { $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null; res(v); };
+    const release = trapFocus($('#modal .box'));
+    const done = v => {
+      $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null;
+      release(); res(v);
+    };
     const ok = $('#mOk'), cc = $('#mCancel');
     ok.onclick = () => done(true); cc.onclick = () => done(false);
   });
@@ -907,11 +911,12 @@ function pickNode(excludeId, hint){
         </button>`).join('');
     }
     $('#pickModal').classList.add('on');
+    const release = trapFocus($('#pickModal .box'));
     const done = v => {
       $('#pickModal').classList.remove('on');
       list.onclick = null; $('#pickCancel').onclick = null;
       document.removeEventListener('keydown', onKey);
-      res(v);
+      release(); res(v);
     };
     const onKey = e => { if(e.key === 'Escape') done(null); };
     document.addEventListener('keydown', onKey);
@@ -986,6 +991,38 @@ function logout(){
 $('#logoutBtn').addEventListener('click', logout);
 /* 已有会话（刷新页面）自动进入 */
 if(token()){ enterApp().catch(() => sessionStorage.removeItem('sg_token')); }
+
+/* ================= 弹层焦点 =================
+   弹层打开时，Tab 不该走到被遮罩盖住的背景里去——那里的东西看不见也点不着。
+   把焦点圈在框内循环，关闭时还给原来的位置。 */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),' +
+  'select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+function trapFocus(box){
+  const prev = document.activeElement;
+  const onKey = e => {
+    if(e.key !== 'Tab') return;
+    const items = [...box.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+    if(!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if(e.shiftKey && (document.activeElement === first || !box.contains(document.activeElement))){
+      e.preventDefault(); last.focus();
+    }else if(!e.shiftKey && (document.activeElement === last || !box.contains(document.activeElement))){
+      e.preventDefault(); first.focus();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+  /* 焦点先落到框内：不然第一次 Tab 就从背景开始走 */
+  setTimeout(() => {
+    if(box.contains(document.activeElement)) return;
+    const items = [...box.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+    (items[0] || box).focus?.();
+  }, 20);
+  return () => {
+    document.removeEventListener('keydown', onKey, true);
+    prev?.focus?.();
+  };
+}
 
 /* ================= 渲染 ================= */
 let datePicker = null;
@@ -1960,6 +1997,7 @@ function noteBox(p){
         </div>
       </div>`;
     document.body.appendChild(wrap);
+    const release = trapFocus(wrap.querySelector('.box'));
     const ta = wrap.querySelector('textarea');
     const cnt = wrap.querySelector('.cnt');
     ta.value = p.note || '';
@@ -1969,7 +2007,9 @@ function noteBox(p){
       cnt.classList.toggle('over', n > 2000);
     };
     ta.addEventListener('input', sync); sync();
-    const close = v => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const close = v => {
+      wrap.remove(); document.removeEventListener('keydown', onKey); release(); resolve(v);
+    };
     const onKey = e => {
       if(e.key === 'Escape') close(null);
       /* Ctrl/⌘+Enter 提交，写长文时不用去够按钮 */
@@ -2126,6 +2166,7 @@ function letterBox(existing){
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  const release = trapFocus(wrap.querySelector('.box'));
   const $$ = sel => wrap.querySelector(sel);
   if(existing){
     $$('#ltTitle').value = existing.title;
@@ -2141,7 +2182,9 @@ function letterBox(existing){
   };
   ta.addEventListener('input', sync); sync();
 
-  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  const close = () => {
+    wrap.remove(); document.removeEventListener('keydown', onKey); release();
+  };
   const submit = async () => {
     const body = {
       title: $$('#ltTitle').value.trim(),
