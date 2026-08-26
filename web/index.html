@@ -796,7 +796,8 @@
   }
   .mailbox.has .mb-count{opacity:1;transform:none;}
   @media (max-width:600px){
-    .mailbox{left:14px;bottom:74px;width:68px;height:74px;}
+    /* 和「回到顶部」并排站一行，比上下叠着清爽；右侧中部留给年份导航 */
+    .mailbox{left:14px;bottom:16px;width:58px;height:64px;}
   }
 
   /* ---- 信件层：信封飞出 → 拆开 → 信纸展开 ---- */
@@ -1024,7 +1025,7 @@
     .year-nav .yr{font-size:9.5px;}
     .year-nav .yr span{opacity:0;}
     .year-nav .yr.act span{opacity:1;}
-    .totop{right:auto;left:16px;bottom:18px;width:40px;height:40px;}
+    .totop{right:auto;left:80px;bottom:28px;width:40px;height:40px;}
   }
 </style>
 </head>
@@ -1860,6 +1861,9 @@ async function loadOnThisDay(){
       b.addEventListener('click', () => jumpToNode(it.node.id, it.node.date));
       list.appendChild(b);
     });
+    /* 晚到的横幅会把内容往下推？实测不会：浏览器的 scroll anchoring 会
+       自动补偿插入的高度（scrollY 跟着调整），视觉上只差 1px。所以不必
+       因为用户已经翻下去就藏起来。 */
     box.append(head, list);
     box.classList.add('on');
   }catch(_){}
@@ -2534,9 +2538,13 @@ document.addEventListener('keydown', e=>{
 addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); });
 
 /* ================= 首屏加载 ================= */
-loadPage().then(() => sentinelIO.observe(sentinel));
-loadOnThisDay();
-loadLetters();
+/* 首屏只争照片：那年今日与信箱都是锦上添花，等时间轴落地了再去拿，
+   免得四个请求一起挤在开局抢带宽。 */
+loadPage().then(() => {
+  sentinelIO.observe(sentinel);
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 250));
+  idle(() => { loadOnThisDay(); loadLetters(); }, {timeout: 1500});
+});
 </script>
 </body>
 </html>
