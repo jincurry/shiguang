@@ -1591,12 +1591,42 @@ function bindNode(node){
   autoClose.observe(wrap);
 }
 
+/* ================= 弹层焦点 =================
+   弹层打开时 Tab 不该走进被遮罩盖住的背景——那里的东西看不见也点不着。
+   灯箱本来就把焦点圈住了，后加的信箱与地点弹层沿用同一套。 */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),' +
+  'select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+function trapFocus(box){
+  const prev = document.activeElement;
+  const onKey = e => {
+    if(e.key !== 'Tab') return;
+    const items = [...box.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+    if(!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if(e.shiftKey && (document.activeElement === first || !box.contains(document.activeElement))){
+      e.preventDefault(); last.focus();
+    }else if(!e.shiftKey && (document.activeElement === last || !box.contains(document.activeElement))){
+      e.preventDefault(); first.focus();
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
+  return () => {
+    document.removeEventListener('keydown', onKey, true);
+    prev?.focus?.();
+  };
+}
+
 /* ================= 地点：同一处的其它日子 ================= */
 const placeBox = document.getElementById('placeBox');
 const placeList = document.getElementById('placeList');
 document.getElementById('placeClose').addEventListener('click', () => closePlace());
 placeBox.addEventListener('click', e => { if(e.target === placeBox) closePlace(); });
-function closePlace(){ placeBox.classList.remove('on'); }
+let placeRelease = null;
+function closePlace(){
+  placeBox.classList.remove('on');
+  placeRelease?.(); placeRelease = null;
+}
 
 async function openPlace(place){
   document.getElementById('placeTitle').textContent = '';
@@ -1606,6 +1636,8 @@ async function openPlace(place){
   h.append(sp);
   placeList.textContent = '正在翻找……';
   placeBox.classList.add('on');
+  placeRelease = trapFocus(placeBox.querySelector('.box'));
+  setTimeout(() => document.getElementById('placeClose').focus(), 20);
   try{
     const res = await fetch(`${API}/places/${encodeURIComponent(place)}`);
     if(!res.ok) throw new Error(String(res.status));
@@ -1770,16 +1802,19 @@ async function openLetter(wrap, env, l){
   }catch(_){}
 }
 
+let mailRelease = null;
 async function openMailbox(){
   if(!lettersLoaded) await loadLetters();
   renderLetters();
   lettersEl.classList.add('on');
   document.documentElement.style.overflow = 'hidden';
+  mailRelease = trapFocus(lettersEl);
   setTimeout(() => document.getElementById('ltClose').focus(), 0);
 }
 function closeMailbox(){
   lettersEl.classList.remove('on');
   document.documentElement.style.overflow = '';
+  mailRelease?.(); mailRelease = null;
   mailbox.focus();
 }
 mailbox.addEventListener('click', openMailbox);
