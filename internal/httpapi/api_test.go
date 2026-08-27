@@ -628,7 +628,7 @@ func TestBatchPhotos(t *testing.T) {
 func TestTimelineWithoutPhotos(t *testing.T) {
 	ts := newTestServer(t, 30)
 	_, node := doJSON(t, "POST", ts.URL+"/api/v1/nodes", testToken,
-		map[string]string{"date": "2026-03-03", "title": "N"})
+		map[string]string{"date": "2026-03-03", "title": "N", "place": "外婆家"})
 	nodeID, _ := node["id"].(string)
 	var jb bytes.Buffer
 	jpeg.Encode(&jb, image.NewRGBA(image.Rect(0, 0, 10, 10)), nil)
@@ -645,6 +645,11 @@ func TestTimelineWithoutPhotos(t *testing.T) {
 	}
 	if photos, _ := it["photos"].([]any); len(photos) != 0 {
 		t.Errorf("photos should be empty, got %v", photos)
+	}
+	// 只要元数据不等于可以少给字段：后台左栏走这条，缺了 place 会让
+	// 已填的地点在界面上显示为空，用户一保存就被清掉
+	if it["place"] != "外婆家" {
+		t.Errorf("include_photos=false 也必须带 place，得到 %v", it["place"])
 	}
 
 	// 默认（不带参数）仍返回照片，前台时间轴依赖它

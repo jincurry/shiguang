@@ -94,10 +94,11 @@ func (s *Service) Timeline(ctx context.Context, cursor string, limit int, withPh
 			return nil, err
 		}
 		for _, n := range nodes {
-			out.Items = append(out.Items, &NodeDTO{
-				ID: n.ID, Date: n.Date, Title: n.Title, Description: n.Description,
-				PhotoCount: counts[n.ID], Photos: []*PhotoDTO{},
-			})
+			// 走 nodeDTO 而不是在这里手写字段：手写过一次就漏了 place，
+			// 后台左栏正是拿这条，结果重新登录后地点全是空的，一保存就清掉
+			d := s.nodeDTO(ctx, n, nil)
+			d.PhotoCount = counts[n.ID]
+			out.Items = append(out.Items, d)
 		}
 		return out, nil
 	}
