@@ -1040,7 +1040,7 @@
 
 <div class="wrap">
   <header>
-    <p class="eyebrow intro i1">Photo Archive<i>/</i>逆序时间轴<i>/</i>Since 2024</p>
+    <p class="eyebrow intro i1">Photo Archive<i>/</i>逆序时间轴<span id="since" hidden><i>/</i>Since <span id="sinceYear"></span></span></p>
     <h1 class="intro i2">拾光<em>·</em>集</h1>
     <p class="lede intro i3">一间小小的暗房。走远的日子都在这里，一张一张，慢慢浮出来。</p>
     <div class="head-row intro i4">
@@ -1912,6 +1912,11 @@ fetch(API + '/stats').then(r => r.ok ? r.json() : null).then(s => {
   if(!s) return;
   const el = document.getElementById('stats');
   const span = (s.year_min && s.year_max) ? (+s.year_max - +s.year_min + 1) : 0;
+  /* Since 跟着相册里最早的那一年走 */
+  if(s.year_min){
+    document.getElementById('sinceYear').textContent = s.year_min;
+    document.getElementById('since').hidden = false;
+  }
   el.textContent = '';
   const frag = [['', s.node_count, ' 个节点 · '], ['', s.photo_count, ' 张相纸 · 跨越 '], ['', span, ' 年']];
   frag.forEach(([_, num, tail]) => {
