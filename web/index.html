@@ -133,6 +133,82 @@
   .year-nav .yr.act i{width:24px;height:2px;}
   .year-nav .yr:hover{color:var(--amber);}
 
+  /* ============ 左栏：现在在看 + 地点索引 ============ */
+  /* 内容列是 960px 居中，年份轨贴右缘；左边这条贴左缘，两边才配平。
+     只在两侧真的腾得出位置时才出现——挤到正文上就本末倒置了。 */
+  .side-rail{display:none;}
+  @media (min-width:1500px){
+    .side-rail{
+      display:flex;flex-direction:column;gap:26px;
+      position:fixed;left:22px;top:50%;transform:translateY(-50%);z-index:30;
+      width:216px;
+      /* 信箱蹲在左下角（bottom:26px + 88px 高），栏子居中撑开时得给它让出位置，
+         不然地点列表的末尾几行会被信箱盖住 */
+      max-height:min(82vh, calc(100vh - 280px));
+    }
+  }
+  /* 栏里没有装饰性文字：标签、日期、次数都是要读的，一律给到 --muted。
+     层级靠字号与字体拉开（10px 等宽小标 / 16px 衬线标题 / 23px 琥珀年份），不靠压暗 */
+  .rail-k{
+    font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--muted);
+    display:flex;align-items:baseline;gap:8px;
+  }
+  .rail-k b{font-weight:400;color:var(--muted);}
+
+  .now-card .nc-y{
+    font-family:var(--mono);font-size:23px;letter-spacing:.1em;color:var(--amber);
+    margin-top:10px;line-height:1;
+  }
+  .now-card .nc-t{
+    font-family:var(--serif);font-weight:600;font-size:16px;line-height:1.5;
+    margin-top:9px;color:var(--ivory);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .now-card .nc-m{
+    margin-top:7px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    color:var(--muted);display:flex;gap:10px;align-items:baseline;
+  }
+  .now-card .nc-m b{font-weight:400;}
+  .now-card .nc-place{margin-top:10px;max-width:100%;}
+  .now-card .nc-place span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* .node-place 自带 display:inline-flex、.place-index 自带 flex，
+     两者都会把 [hidden] 顶掉，这里明写一条压回去 */
+  .now-card[hidden],.place-index[hidden],.nc-place[hidden]{display:none;}
+  /* 卡片自己不带边框，只用一条左侧细线拴住——右边那条年份轨也是这个调子 */
+  .now-card{border-left:1px solid var(--line);padding-left:14px;}
+
+  .place-index{
+    display:flex;flex-direction:column;min-height:0;
+    border-left:1px solid var(--line);padding-left:14px;
+  }
+  .pi-list{
+    margin-top:10px;overflow-y:auto;min-height:0;
+    display:flex;flex-direction:column;gap:1px;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
+  }
+  /* 底部渐隐只在真的滚得动时才加：列表装得下却还淡一截，
+     最后一个地方看着像是被禁用了 */
+  .pi-list.scrolls{
+    -webkit-mask:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 22px),transparent);
+    mask:linear-gradient(180deg,transparent,#000 18px,#000 calc(100% - 22px),transparent);
+  }
+  .pi-row{
+    display:flex;align-items:baseline;gap:8px;text-align:left;width:100%;
+    padding:5px 8px 5px 0;border-radius:6px;
+    transition:color .2s,background .2s;
+  }
+  .pi-row .n{
+    font-size:13px;color:var(--muted);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;
+  }
+  .pi-row .c{
+    margin-left:auto;flex:none;
+    font-family:var(--mono);font-size:10px;color:var(--muted);
+  }
+  .pi-row:hover{background:var(--ghost);}
+  .pi-row:hover .n,.pi-row:focus-visible .n{color:var(--amber);}
+  .pi-row:hover .c{color:var(--muted);}
+
   /* ============ 页头 ============ */
   header{padding:76px 0 0;}
   .eyebrow{
@@ -1037,7 +1113,6 @@
 </button>
 
 <nav class="year-nav" id="yearNav" aria-label="按年份跳转"></nav>
-
 <div class="wrap">
   <header>
     <p class="eyebrow intro i1">Photo Archive<i>/</i>逆序时间轴<span id="since" hidden><i>/</i>Since <span id="sinceYear"></span></span></p>
@@ -1054,6 +1129,23 @@
     <div class="timeline" id="timeline"></div>
   </main>
 </div>
+
+<!-- 左栏：宽屏才出现（窄屏 display:none，连数据都不拉） -->
+<aside class="side-rail" id="sideRail" aria-label="侧栏索引">
+  <section class="now-card" id="nowCard" hidden>
+    <p class="rail-k">现在在看</p>
+    <p class="nc-y" id="ncYear"></p>
+    <p class="nc-t" id="ncTitle"></p>
+    <p class="nc-m"><span id="ncDate"></span><b id="ncCount"></b></p>
+    <button class="node-place nc-place" id="ncPlace" type="button" hidden>
+      <i aria-hidden="true">◎</i><span></span>
+    </button>
+  </section>
+  <section class="place-index" id="placeIndex" hidden>
+    <p class="rail-k">去过的地方<b id="piCount"></b></p>
+    <div class="pi-list" id="piList"></div>
+  </section>
+</aside>
 
 <footer>拾光集 · 家庭照片时间轴 · 底片在暗房里静静显影</footer>
 
@@ -1406,6 +1498,7 @@ function buildNode(n){
   bindNode(art);
   observeReveal(art);
   tl.appendChild(art);
+  nowIO.observe(art);
 }
 
 /* 每张相纸挂上晾片线的角度、木夹位置、入场延迟都带点随机，避免排得像标本 */
@@ -1685,8 +1778,77 @@ async function jumpToNode(id, date){
 
 document.addEventListener('click', e => {
   const pb = e.target.closest('.node-place');
-  if(pb){ openPlace(pb.closest('.node').dataset.place); }
+  /* 节点上的地点标签从节点读，左栏那颗自己带 dataset（它不在 .node 里） */
+  if(pb){
+    const pl = pb.dataset.place || pb.closest('.node')?.dataset.place;
+    if(pl) openPlace(pl);
+  }
 });
+
+/* ================= 左栏：现在在看 + 地点索引 ================= */
+/* 只有宽屏腾得出位置时这条栏才存在（CSS display:none），窄屏连请求都不发 */
+const railOn = matchMedia('(min-width:1500px)');
+const nowCard = document.getElementById('nowCard');
+const ncPlaceBtn = document.getElementById('ncPlace');
+
+async function loadPlaces(){
+  if(!railOn.matches) return;
+  try{
+    const res = await fetch(`${API}/places`);
+    if(!res.ok) return;
+    const {items} = await res.json();
+    if(!items || !items.length) return;
+    const list = document.getElementById('piList');
+    list.textContent = '';
+    items.forEach(p => {
+      const b = document.createElement('button');
+      b.className = 'pi-row'; b.type = 'button';
+      b.setAttribute('aria-label', `${p.place}，${p.count} 个日子`);
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = p.place;
+      const c = document.createElement('span'); c.className = 'c'; c.textContent = p.count;
+      b.append(n, c);
+      b.addEventListener('click', () => openPlace(p.place));
+      list.appendChild(b);
+    });
+    document.getElementById('piCount').textContent = items.length;
+    document.getElementById('placeIndex').hidden = false;
+    list.classList.toggle('scrolls', list.scrollHeight > list.clientHeight + 1);
+  }catch(_){}
+}
+
+/* 现在在看：在视口 35% 处横一条窄带，压在带子上的那个节点就是"当前"。
+   用 IntersectionObserver 而不是在 scroll 里量位置——几十上百个节点
+   每帧读一遍 offsetTop 不划算，年份轨那点量已经是上限了。 */
+const inBand = new Set();
+let nowNode = null;
+const nowIO = new IntersectionObserver(es => {
+  es.forEach(e => e.isIntersecting ? inBand.add(e.target) : inBand.delete(e.target));
+  updateNow();
+}, {rootMargin: '-35% 0px -64% 0px', threshold: 0});
+
+function updateNow(){
+  if(!railOn.matches || !inBand.size) return;   /* 带子落在两节点的空隙里就保持原样，不闪 */
+  let cur = null, low = -Infinity;
+  inBand.forEach(el => {                        /* 时间轴是竖排不重叠的，最靠下的那个即文档序最后 */
+    const t = el.getBoundingClientRect().top;
+    if(t > low){ low = t; cur = el; }
+  });
+  if(!cur || cur === nowNode) return;
+  nowNode = cur;
+  const date = cur._date || '';
+  document.getElementById('ncYear').textContent = date.slice(0, 4);
+  document.getElementById('ncTitle').textContent = cur.querySelector('.node-title').textContent;
+  document.getElementById('ncDate').textContent = date;
+  const total = cur._total || 0;
+  document.getElementById('ncCount').textContent = total ? '×' + total : '';
+  const pl = cur.dataset.place || '';
+  ncPlaceBtn.hidden = !pl;
+  ncPlaceBtn.dataset.place = pl;
+  if(pl) ncPlaceBtn.querySelector('span').textContent = pl;
+  nowCard.hidden = false;
+}
+/* 窗口拉窄到藏起左栏再拉回来：重算一次，免得卡片停在旧节点上 */
+railOn.addEventListener?.('change', () => { nowNode = null; updateNow(); });
 document.addEventListener('keydown', e => {
   if(e.key === 'Escape' && placeBox.classList.contains('on')) closePlace();
 });
@@ -2548,7 +2710,7 @@ addEventListener('resize', ()=>{ if(lb.classList.contains('on')) renderPanes(); 
 loadPage().then(() => {
   sentinelIO.observe(sentinel);
   const idle = window.requestIdleCallback || (fn => setTimeout(fn, 250));
-  idle(() => { loadOnThisDay(); loadLetters(); }, {timeout: 1500});
+  idle(() => { loadOnThisDay(); loadLetters(); loadPlaces(); }, {timeout: 1500});
 });
 </script>
 </body>
