@@ -150,6 +150,7 @@ func (s *Server) Handler() http.Handler {
 				g.Post("/photos/{id}/reprocess", s.handleReprocess)
 				g.Post("/photos/batch", s.handleBatchPhotos)
 				g.Get("/trash", s.handleTrash)
+				g.Delete("/trash/{kind}/{id}", s.handlePurgeTrash)
 				// 上传端点：单独限流 10 次/分钟
 				g.Group(func(u chi.Router) {
 					u.Use(uploadLimit)
@@ -508,6 +509,15 @@ func (s *Server) handleTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
+	err := s.svc.PurgeTrashItem(r.Context(), chi.URLParam(r, "kind"), chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ===== 上传 handler =====

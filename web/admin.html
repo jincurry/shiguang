@@ -507,7 +507,8 @@
   .t-item .ty{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.2em;}
   .t-item .nm{font-family:var(--serif);font-weight:600;margin-top:4px;font-size:15px;}
   .t-item .cd{font-family:var(--mono);font-size:11px;color:var(--safelight);margin-top:6px;}
-  .t-item .row{margin-top:12px;display:flex;gap:8px;}
+  .t-item .row{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;}
+  .t-item .row .btn{padding:6px 12px;font-size:12.5px;}
   .t-empty{grid-column:1/-1;text-align:center;color:var(--faint);
     font-family:var(--mono);font-size:12px;letter-spacing:.15em;padding:60px 0;}
 
@@ -909,8 +910,14 @@ function confirmBox(title, body){
     const release = trapFocus($('#modal .box'));
     const done = v => {
       $('#modal').classList.remove('on'); ok.onclick = cc.onclick = null;
+      document.removeEventListener('keydown', onKey, true);
       release(); res(v);
     };
+    /* Esc = 取消。别处的弹层都认这一下，守着不可逆操作的这个更该认 */
+    const onKey = e => {
+      if(e.key === 'Escape'){ e.preventDefault(); done(false); }
+    };
+    document.addEventListener('keydown', onKey, true);
     const ok = $('#mOk'), cc = $('#mCancel');
     ok.onclick = () => done(true); cc.onclick = () => done(false);
   });
@@ -2339,24 +2346,51 @@ function renderTrash(){
         : `<div class="mono" style="font-size:11px;color:var(--muted)">来自「${esc(t.extra?.node_title || '')}」</div>`}
       <div class="cd">${daysLeft(t.purge_at)} 天后自动清除</div>
       <div class="row">
-        <button class="btn" style="padding:6px 14px;font-size:12.5px" data-restore="${i}">恢复</button>
+        <button class="btn" data-restore="${i}">恢复</button>
+        <button class="btn danger" data-purge="${i}">立即删除</button>
       </div>
     </div>`).join('');
   el.onclick = async e => {
-    const b = e.target.closest('[data-restore]'); if(!b) return;
-    const t = state.trash[+b.dataset.restore]; if(!t) return;
-    try{
-      await api(t.type === 'node' ? `/nodes/${t.id}/restore` : `/photos/${t.id}/restore`,
-                {method: 'POST'});
-      await loadAll();
-      if(!node(state.sel)) state.sel = state.nodes[0]?.id || null;
-      clearSel();
-      renderAll(); renderTrash();
-      toast('已恢复', 'ok');
-    }catch(err){
-      toast(errMsg(err, '恢复失败'), 'err');
-    }
+    const r = e.target.closest('[data-restore]');
+    if(r){ trashRestore(state.trash[+r.dataset.restore]); return; }
+    const p = e.target.closest('[data-purge]');
+    if(p){ trashPurge(state.trash[+p.dataset.purge]); }
   };
+}
+async function trashRestore(t){
+  if(!t) return;
+  try{
+    await api(t.type === 'node' ? `/nodes/${t.id}/restore` : `/photos/${t.id}/restore`,
+              {method: 'POST'});
+    await loadAll();
+    if(!node(state.sel)) state.sel = state.nodes[0]?.id || null;
+    clearSel();
+    renderAll(); renderTrash();
+    toast('已恢复', 'ok');
+  }catch(err){
+    toast(errMsg(err, '恢复失败'), 'err');
+  }
+}
+// 不等 7 天，立刻抹掉。原图和变体一并释放（同一张图若还被别处引用则保留），
+// 所以这里的二次确认必须把"再也找不回来"说清楚。
+async function trashPurge(t){
+  if(!t) return;
+  const what = t.type === 'node'
+    ? `节点「${t.name || '（无题）'}」及其 ${Number(t.extra?.photo_count) || 0} 张照片`
+    : `照片「${t.name || '（无题）'}」`;
+  if(!await confirmBox('立即彻底删除？',
+      `${what}将被立即抹去，连同原图一起，无法恢复。`)) return;
+  try{
+    await api(`/trash/${t.type}/${t.id}`, {method: 'DELETE'});
+    state.trash = (await api('/trash')).items;
+    await loadAll();
+    if(!node(state.sel)) state.sel = state.nodes[0]?.id || null;
+    clearSel();
+    renderAll(); renderTrash();
+    toast('已彻底删除', 'ok');
+  }catch(err){
+    toast(errMsg(err, '删除失败'), 'err');
+  }
 }
 </script>
 </body>

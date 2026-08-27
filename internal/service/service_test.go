@@ -514,3 +514,112 @@ func TestConfirmFailedIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestPurgeTrashItem 立即删除：不等 TTL 就抹掉行与 blob，
+// 但共享同一张原图时必须保留 blob；未进回收站的 id 一律拒绝。
+func TestPurgeTrashItem(t *testing.T) {
+	svc, fake := newTestService(t, Config{TrashTTLDays: 7})
+	ctx := context.Background()
+	raw := testJPEG(t, 4)
+
+	nA := mkNode(t, svc, "2026-05-01", "A")
+	nB := mkNode(t, svc, "2026-05-02", "B")
+	pA, err := svc.UploadLocal(ctx, nA.ID, "x.jpg", "", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, svc, pA.ID, "ready")
+	pB, err := svc.UploadLocal(ctx, nB.ID, "x.jpg", "", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, svc, pB.ID, "ready")
+
+	// 还没进回收站 → 拒绝（这个接口不能变成绕过回收站的直删）
+	if err := svc.PurgeTrashItem(ctx, "photo", pA.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("purge live photo: got %v, want ErrNotFound", err)
+	}
+	if err := svc.PurgeTrashItem(ctx, "node", nA.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("purge live node: got %v, want ErrNotFound", err)
+	}
+	if err := svc.PurgeTrashItem(ctx, "letter", pA.ID); err == nil {
+		t.Error("unknown kind should be rejected")
+	}
+
+	// 删 A 的照片后立即清除：行没了，但 blob 还被 B 引用，必须留着
+	if err := svc.DeletePhoto(ctx, pA.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PurgeTrashItem(ctx, "photo", pA.ID); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := svc.ListTrash(ctx)
+	if len(tr.Items) != 0 {
+		t.Fatalf("trash should be empty after purge: %+v", tr.Items)
+	}
+	if _, err := svc.GetPhoto(ctx, pA.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("purged photo should be gone, got %v", err)
+	}
+	if len(fake.Keys()) == 0 {
+		t.Fatal("purge deleted blobs still referenced by another node")
+	}
+	if _, err := svc.GetPhoto(ctx, pB.ID); err != nil {
+		t.Fatalf("photo B should be untouched: %v", err)
+	}
+
+	// 删 B 所在的节点后立即清除整个节点：行与 blob 一起清空
+	if err := svc.DeleteNode(ctx, nB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PurgeTrashItem(ctx, "node", nB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.GetNode(ctx, nB.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("purged node should be gone, got %v", err)
+	}
+	if _, err := svc.GetPhoto(ctx, pB.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("photo of purged node should be gone, got %v", err)
+	}
+	if len(fake.Keys()) != 0 {
+		t.Errorf("blobs should be empty after last ref purged, got %v", fake.Keys())
+	}
+	// 二次清除同一个 id → ErrNotFound，不是 panic
+	if err := svc.PurgeTrashItem(ctx, "node", nB.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("double purge: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestPurgeNodeWithPreDeletedPhoto 节点被删之前先单删过一张照片：
+// 立即清除节点时那张软删的照片行也必须一起抹掉，不能留成野行。
+func TestPurgeNodeWithPreDeletedPhoto(t *testing.T) {
+	svc, fake := newTestService(t, Config{TrashTTLDays: 7})
+	ctx := context.Background()
+	n := mkNode(t, svc, "2026-06-06", "N")
+	p1, err := svc.UploadLocal(ctx, n.ID, "a.jpg", "", bytes.NewReader(testJPEG(t, 6)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, svc, p1.ID, "ready")
+	p2, err := svc.UploadLocal(ctx, n.ID, "b.jpg", "", bytes.NewReader(testJPEG(t, 7)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, svc, p2.ID, "ready")
+
+	if err := svc.DeletePhoto(ctx, p1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteNode(ctx, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PurgeTrashItem(ctx, "node", n.ID); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := svc.ListTrash(ctx)
+	if len(tr.Items) != 0 {
+		t.Fatalf("trash should be empty, got %+v", tr.Items)
+	}
+	if len(fake.Keys()) != 0 {
+		t.Errorf("both photos' blobs should be gone, got %v", fake.Keys())
+	}
+}

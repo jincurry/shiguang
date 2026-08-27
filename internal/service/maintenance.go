@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,82 @@ func (s *Service) GC(ctx context.Context) error {
 	}
 
 	return s.reconcileOrphans(ctx)
+}
+
+// PurgeTrashItem 立即物理清除回收站里的一个条目（node | photo），不等 TTL 到期。
+// 走的是和 GC 完全相同的一套：删行 → 逐 sha 校验引用数为 0 → 删 blob，
+// 差别只在挑条目的方式。不在回收站的 id 一律 ErrNotFound——
+// 这个接口只能清已经软删的东西，绝不能变成绕过回收站的直删通道。
+func (s *Service) PurgeTrashItem(ctx context.Context, kind, id string) error {
+	shas := map[string]bool{}
+
+	switch kind {
+	case "node":
+		n, err := s.st.GetNode(ctx, id, true)
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if n.DeletedAt == nil {
+			return ErrNotFound
+		}
+		photos, err := s.st.PhotoRowsOfNode(ctx, id)
+		if err != nil {
+			return err
+		}
+		ids := make([]string, 0, len(photos))
+		for _, p := range photos {
+			ids = append(ids, p.ID)
+			if p.SHA256 != nil {
+				shas[*p.SHA256] = true
+			}
+		}
+		if err := s.st.HardDeletePhotos(ctx, ids); err != nil {
+			return err
+		}
+		if err := s.st.HardDeleteNode(ctx, id); err != nil {
+			return err
+		}
+
+	case "photo":
+		p, err := s.st.GetPhoto(ctx, id, true)
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if p.DeletedAt == nil {
+			return ErrNotFound
+		}
+		if p.SHA256 != nil {
+			shas[*p.SHA256] = true
+		}
+		if err := s.st.HardDeletePhotos(ctx, []string{id}); err != nil {
+			return err
+		}
+
+	default:
+		return Validationf("kind 只能是 node 或 photo")
+	}
+
+	// 行已删，仍无人引用的 sha 才可以删 blob（同图可被多节点共享）
+	for sha := range shas {
+		n, err := s.st.CountAnySHARefs(ctx, sha)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		s.deleteBlobsForSHA(ctx, sha)
+	}
+
+	s.invalidateStats()
+	s.log.Info("purged trash item", "kind", kind, "id", id)
+	return nil
 }
 
 // deleteBlobsForSHA 删除某 sha 的原图与全部变体。

@@ -520,6 +520,32 @@ func (s *Store) ListPurgeableNodes(ctx context.Context, cutoff string) (map[stri
 	return out, rows.Err()
 }
 
+// PhotoRowsOfNode 列出节点下全部照片行（含软删的），只带 id 与 sha。
+// 立即清除回收站里的节点时用：节点被删之前可能已单独删过几张照片，
+// 那些行走 PhotosByNodeIDs 是看不见的，漏掉就会留下野行和野 blob。
+func (s *Store) PhotoRowsOfNode(ctx context.Context, nodeID string) ([]*PurgeablePhoto, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT id, sha256 FROM photos WHERE node_id=?`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("store: photo rows of node: %w", err)
+	}
+	defer rows.Close()
+	var out []*PurgeablePhoto
+	for rows.Next() {
+		p := &PurgeablePhoto{}
+		var sha sql.NullString
+		if err := rows.Scan(&p.ID, &sha); err != nil {
+			return nil, err
+		}
+		if sha.Valid {
+			v := sha.String
+			p.SHA256 = &v
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // HardDeletePhotos 物理删除照片行（及其上传会话）。
 func (s *Store) HardDeletePhotos(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
